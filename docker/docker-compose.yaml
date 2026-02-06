@@ -1,10 +1,10 @@
 version: '3.8'
 
 services:
-  # 1. The FastAPI Service
+  
   api:
     build:
-      context: ../fastapi_service  # Go up one level, then into fastapi_service
+      context: ../fastapi_service  
       dockerfile: Dockerfile
     container_name: gourmetgram_api
     ports:
@@ -20,11 +20,11 @@ services:
         condition: service_healthy
       minio:
         condition: service_started
-    # Mount the 'app' folder specifically so hot-reloading works
+    
     volumes:
       - ../fastapi_service/app:/code/app
 
-  # 2. Primary Database (Postgres)
+  
   postgres:
     image: postgres:15
     container_name: gourmetgram_db
@@ -42,7 +42,7 @@ services:
       timeout: 5s
       retries: 5
 
-  # 3. Object Storage (MinIO)
+  
   minio:
     image: minio/minio
     container_name: gourmetgram_minio

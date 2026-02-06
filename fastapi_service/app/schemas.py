@@ -52,6 +52,9 @@ class FlagCreate(BaseModel):
 
 class FlagResponse(BaseModel):
     id: UUID
+    user_id: UUID
+    image_id: Optional[UUID] = None
+    comment_id: Optional[UUID] = None
     reason: str
     created_at: datetime
     class Config:

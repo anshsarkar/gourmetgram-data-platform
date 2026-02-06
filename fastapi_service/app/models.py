@@ -12,7 +12,6 @@ class User(Base):
     username = Column(String, unique=True, index=True, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
-    # Relationships
     images = relationship("Image", back_populates="user")
     comments = relationship("Comment", back_populates="user")
     flags = relationship("Flag", back_populates="user")
@@ -28,7 +27,6 @@ class Image(Base):
     uploaded_at = Column(DateTime(timezone=True), server_default=func.now())
     views = Column(Integer, default=0)
 
-    # Relationships
     user = relationship("User", back_populates="images")
     comments = relationship("Comment", back_populates="image", cascade="all, delete-orphan")
     flags = relationship("Flag", back_populates="image")
@@ -42,7 +40,6 @@ class Comment(Base):
     content = Column(Text, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
-    # Relationships
     image = relationship("Image", back_populates="comments")
     user = relationship("User", back_populates="comments")
     flags = relationship("Flag", back_populates="comment")
@@ -57,7 +54,6 @@ class Flag(Base):
     reason = Column(Text, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
-    # Relationships
     user = relationship("User", back_populates="flags")
     image = relationship("Image", back_populates="flags")
     comment = relationship("Comment", back_populates="flags")
