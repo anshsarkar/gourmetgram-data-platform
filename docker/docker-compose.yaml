@@ -1,30 +1,115 @@
 version: '3.8'
 
 services:
-  
-  api:
-    build:
-      context: ../fastapi_service  
-      dockerfile: Dockerfile
-    container_name: gourmetgram_api
-    ports:
-      - "8000:8000"
-    environment:
-      - DATABASE_URL=postgresql://user:password@postgres:5432/gourmetgram
-      - AWS_ACCESS_KEY_ID=admin
-      - AWS_SECRET_ACCESS_KEY=password
-      - S3_ENDPOINT_URL=http://minio:9000
-      - S3_BUCKET_NAME=gourmetgram-images
-    depends_on:
-      postgres:
-        condition: service_healthy
-      minio:
-        condition: service_started
-    
-    volumes:
-      - ../fastapi_service/app:/code/app
 
-  
+  # ETL: Extract - Download Food-11 dataset
+  extract-data:
+    container_name: etl_extract_data
+    image: python:3.11
+    user: root
+    volumes:
+      - food11:/data
+    working_dir: /data
+    command:
+      - bash
+      - -c
+      - |
+        set -e
+
+        echo "Resetting dataset directory..."
+        rm -rf Food-11
+        mkdir -p Food-11
+        cd Food-11
+
+        echo "Downloading dataset zip..."
+        curl -L https://nyu.box.com/shared/static/m5kvcl25hfpljul3elhu6xz8y2w61op4.zip \
+          -o Food-11.zip
+
+        echo "Unzipping dataset..."
+        unzip -q Food-11.zip
+        rm -f Food-11.zip
+
+        echo ""
+        echo "========== EXTRACT STAGE SUMMARY =========="
+        echo "Contents of /data:"
+        ls -l /data
+        echo ""
+        echo "Item counts per folder:"
+        for dir in /data/Food-11/*/; do
+          count=$$(find "$$dir" -type f | wc -l)
+          echo "  $$(basename $$dir): $$count items"
+        done
+        total=$$(find /data/Food-11 -type f | wc -l)
+        echo "----------------------------------------"
+        echo "TOTAL ITEMS: $$total"
+        echo "==========================================="
+
+  # ETL: Transform - Organize into class folders
+  transform-data:
+    container_name: etl_transform_data
+    image: python:3.11
+    volumes:
+      - food11:/data
+    working_dir: /data/Food-11
+    depends_on:
+      extract-data:
+        condition: service_completed_successfully
+    command:
+      - bash
+      - -c
+      - |
+        set -e
+
+        python3 -c '
+        import os
+        import shutil
+
+        dataset_base_dir = "/data/Food-11"
+        subdirs = ["training", "validation", "evaluation"]
+        classes = [
+            "Bread", "Dairy product", "Dessert", "Egg", "Fried food",
+            "Meat", "Noodles/Pasta", "Rice", "Seafood", "Soup", "Vegetable/Fruit"
+        ]
+
+        for subdir in subdirs:
+            dir_path = os.path.join(dataset_base_dir, subdir)
+            if not os.path.exists(dir_path):
+                continue
+
+            for i, class_name in enumerate(classes):
+                class_dir = os.path.join(dir_path, f"class_{i:02d}")
+                os.makedirs(class_dir, exist_ok=True)
+                for f in os.listdir(dir_path):
+                    if f.startswith(f"{i}_"):
+                        shutil.move(
+                            os.path.join(dir_path, f),
+                            os.path.join(class_dir, f)
+                        )
+        '
+
+        echo ""
+        echo "========== TRANSFORM STAGE SUMMARY =========="
+        echo "Contents of /data/Food-11:"
+        ls -l /data/Food-11
+        echo ""
+        for split in training validation evaluation; do
+          if [ -d "/data/Food-11/$$split" ]; then
+            echo "--- $$split ---"
+            for class_dir in /data/Food-11/$$split/*/; do
+              count=$$(find "$$class_dir" -type f | wc -l)
+              echo "  $$(basename $$class_dir): $$count items"
+            done
+            split_total=$$(find /data/Food-11/$$split -type f | wc -l)
+            echo "  SUBTOTAL: $$split_total"
+            echo ""
+          fi
+        done
+        total=$$(find /data/Food-11 -type f | wc -l)
+        echo "----------------------------------------"
+        echo "TOTAL ITEMS: $$total"
+        echo "============================================="
+
+  # PostgreSQL Database
   postgres:
     image: postgres:15
     container_name: gourmetgram_db
@@ -42,7 +127,7 @@ services:
       timeout: 5s
       retries: 5
 
-  
+  # MinIO Object Storage
   minio:
     image: minio/minio
     container_name: gourmetgram_minio
@@ -56,6 +141,51 @@ services:
     volumes:
       - minio_data:/data
 
+  # FastAPI Service
+  api:
+    build:
+      context: ../fastapi_service
+      dockerfile: Dockerfile
+    container_name: gourmetgram_api
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql://user:password@postgres:5432/gourmetgram
+      - AWS_ACCESS_KEY_ID=admin
+      - AWS_SECRET_ACCESS_KEY=password
+      - S3_ENDPOINT_URL=http://minio:9000
+      - S3_BUCKET_NAME=gourmetgram-images
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_started
+    volumes:
+      - ../fastapi_service/app:/code/app
+
+  # Data Generator
+  data_generator:
+    build:
+      context: ../data_generator
+      dockerfile: Dockerfile
+    container_name: gourmetgram_generator
+    environment:
+      - GENERATOR_API_URL=http://api:8000
+      - GENERATOR_DATASET_PATH=/data/Food-11
+      - GENERATOR_ARRIVAL_RATE=150.0
+      - GENERATOR_INITIAL_USERS=10
+      - GENERATOR_INITIAL_IMAGES=20
+      - GENERATOR_LOG_LEVEL=INFO
+    depends_on:
+      api:
+        condition: service_started
+      transform-data:
+        condition: service_completed_successfully
+    volumes:
+      - food11:/data:ro
+    restart: unless-stopped
+
 volumes:
   postgres_data:
   minio_data:
+  food11:
