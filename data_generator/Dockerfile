@@ -2,7 +2,6 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Prevent Python from writing pyc files and buffer stdout/stderr
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
@@ -10,8 +9,8 @@ ENV PYTHONUNBUFFERED=1
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy the application code
-COPY . .
+# Copy the entire data_generator package into /app/data_generator
+COPY . /app/data_generator/
 
-# Run the data generator
+# Run the data generator as a module
 CMD ["python", "-m", "data_generator.main"]
