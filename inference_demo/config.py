@@ -42,7 +42,7 @@ class Config:
             "Vegetable/Fruit"  # class_10
         ]
 
-        # Feature Names (30 total)
+        # Feature Names (31 total)
         self.feature_names = [
             # Temporal (4)
             'time_since_upload_seconds',

@@ -141,7 +141,7 @@ def display_results(results: Dict[str, Any], constructor: FeatureConstructor, sh
 
     # Feature vector
     if show_features:
-        print("\n📈 Feature Vector (30 dimensions):")
+        print("\n📈 Feature Vector (31 dimensions):")
         print(constructor.format_feature_summary(feature_vector, compact=False))
 
     else:
@@ -281,7 +281,7 @@ def main():
     print("\nPhase 2: Demonstrating end-to-end ML inference pipeline")
     print("  ✓ Feature retrieval from Redis (sorted sets)")
     print("  ✓ Metadata fetching from Postgres")
-    print("  ✓ Feature engineering (30-dimensional vector)")
+    print("  ✓ Feature engineering (31-dimensional vector)")
     print("  ✓ Heuristic-based moderation prediction")
 
     # Initialize components

@@ -22,9 +22,9 @@ class FeatureConstructor:
 
     def construct_feature_vector(self, raw_features: Dict[str, Any]) -> np.ndarray:
         """
-        Convert raw features to 30-dimensional feature vector.
+        Convert raw features to 31-dimensional feature vector.
 
-        Feature Vector Structure (30 dimensions):
+        Feature Vector Structure (31 dimensions):
         [0-3]:   Temporal (4)
         [4-6]:   Totals (3)
         [7-12]:  Windows (6)
@@ -33,7 +33,7 @@ class FeatureConstructor:
         [18-19]: User (2)
         [20-30]: Category One-Hot (11)
 
-        Returns numpy array of shape (30,)
+        Returns numpy array of shape (31,)
         """
         features = []
 
@@ -122,9 +122,9 @@ class FeatureConstructor:
         feature_vector = np.array(features, dtype=np.float32)
 
         # Validate
-        if len(feature_vector) != 30:
-            logger.error(f"Feature vector has {len(feature_vector)} dimensions, expected 30")
-            raise ValueError(f"Feature vector dimension mismatch: {len(feature_vector)} != 30")
+        if len(feature_vector) != 31:
+            logger.error(f"Feature vector has {len(feature_vector)} dimensions, expected 31")
+            raise ValueError(f"Feature vector dimension mismatch: {len(feature_vector)} != 31")
 
         if np.any(np.isnan(feature_vector)):
             logger.warning("Feature vector contains NaN values")

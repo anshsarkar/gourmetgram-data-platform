@@ -301,7 +301,7 @@ def run_scenario_test(scenario: TestScenario, client: httpx.Client, fetcher: Fea
     print("\n4️⃣  Constructing feature vector...")
     feature_vector = constructor.construct_feature_vector(raw_features)
     feature_dict = constructor.get_feature_dict(feature_vector)
-    print(f"   ✅ Feature vector constructed (30 dimensions)")
+    print(f"   ✅ Feature vector constructed (31 dimensions)")
 
     # Make prediction
     print("\n5️⃣  Making prediction...")
