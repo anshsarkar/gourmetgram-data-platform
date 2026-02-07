@@ -87,8 +87,8 @@ def create_test_scenarios():
     scenario2.expect_feature('views_1min', 150, tolerance=10)
     scenario2.expect_feature('view_velocity_per_min', 30.0, tolerance=5.0)  # 150/5 min = 30/min
 
-    # Expected prediction (viral threshold triggers +0.2)
-    scenario2.expect_prediction(min_prob=0.35, max_prob=0.6, recommendation='REVIEW')
+    # Expected prediction (viral +0.2, high activity +0.15)
+    scenario2.expect_prediction(min_prob=0.5, max_prob=0.75, recommendation='REVIEW')
 
     scenarios.append(scenario2)
 
