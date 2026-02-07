@@ -241,6 +241,33 @@ services:
       - food11:/data:ro
     restart: unless-stopped
 
+  # Stream Consumer (Real-time Aggregations)
+  stream_consumer:
+    build:
+      context: ../stream_consumer
+      dockerfile: Dockerfile
+    container_name: gourmetgram_stream_consumer
+    environment:
+      - KAFKA_BOOTSTRAP_SERVERS=redpanda:9092
+      - KAFKA_CONSUMER_GROUP=gourmetgram-stream-consumer
+      - KAFKA_TOPICS=gourmetgram.views,gourmetgram.comments,gourmetgram.uploads,gourmetgram.flags
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_DB=0
+      - DATABASE_URL=postgresql://user:password@postgres:5432/gourmetgram
+      - LOG_LEVEL=INFO
+      - VIRAL_THRESHOLD_VIEWS_5MIN=100
+      - SUSPICIOUS_THRESHOLD_COMMENTS_1MIN=10
+      - POPULAR_THRESHOLD_VIEWS_1HR=50
+    depends_on:
+      redpanda:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
 volumes:
   postgres_data:
   minio_data:
