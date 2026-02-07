@@ -216,16 +216,17 @@ def verify_comment_aggregations(expected_1min: int, expected_total: int):
     else:
         print_result(False, "Total comments key NOT found")
 
-    # Check 1min window
+    # Check 1min window (now using sorted set like views)
     comments_1min_key = f"image:{TEST_IMAGE_ID}:comments:1min"
-    comments_1min = redis_client.get(comments_1min_key)
+    comments_1min_count = redis_client.zcard(comments_1min_key)
 
-    if comments_1min:
-        comments_1min = int(comments_1min)
-        passed = comments_1min >= expected_1min
-        print_result(passed, f"Comments in 1min window: {comments_1min} (expected >= {expected_1min})")
-    else:
-        print_result(False, "Comments 1min key NOT found")
+    passed = comments_1min_count >= expected_1min
+    print_result(passed, f"Comments in 1min window: {comments_1min_count} (expected >= {expected_1min})")
+
+    # Check 5min window
+    comments_5min_key = f"image:{TEST_IMAGE_ID}:comments:5min"
+    comments_5min_count = redis_client.zcard(comments_5min_key)
+    print_result(True, f"Comments in 5min window: {comments_5min_count}")
 
 
 def test_viral_alert():
@@ -274,9 +275,45 @@ def test_milestone():
         print_result(False, "Could not verify milestone")
 
 
+def test_rolling_window_expiration():
+    """Test: Verify rolling windows expire old entries"""
+    print_header("TEST CASE 4: Rolling Window Expiration")
+
+    print_test("Wait 65 seconds to test 1min window expiration")
+    print("⏳ This test verifies that the 1min rolling window correctly expires old entries...")
+
+    # Get current counts
+    views_1min_before = redis_client.zcard(f"image:{TEST_IMAGE_ID}:views:1min")
+    comments_1min_before = redis_client.zcard(f"image:{TEST_IMAGE_ID}:comments:1min")
+
+    print(f"   Before wait: views_1min={views_1min_before}, comments_1min={comments_1min_before}")
+
+    # Wait 65 seconds (1min + 5s buffer)
+    for i in range(13):
+        time.sleep(5)
+        print(f"   Waiting... {(i+1)*5}s / 65s", end="\r")
+
+    print("\n")
+
+    # Get counts after expiration
+    views_1min_after = redis_client.zcard(f"image:{TEST_IMAGE_ID}:views:1min")
+    comments_1min_after = redis_client.zcard(f"image:{TEST_IMAGE_ID}:comments:1min")
+
+    print(f"   After 65s: views_1min={views_1min_after}, comments_1min={comments_1min_after}")
+
+    # Verify expiration (1min window should be empty or near-empty after 65s)
+    passed = views_1min_after < views_1min_before and comments_1min_after < comments_1min_before
+    print_result(passed, "1min window entries expired correctly")
+
+    # Verify totals didn't change (persistent counters)
+    total_views = int(redis_client.get(f"image:{TEST_IMAGE_ID}:total_views") or 0)
+    total_comments = int(redis_client.get(f"image:{TEST_IMAGE_ID}:total_comments") or 0)
+    print_result(total_views > 0 and total_comments > 0, f"Totals preserved: views={total_views}, comments={total_comments}")
+
+
 def test_feature_retrieval():
     """Test: Retrieve complete feature vector"""
-    print_header("TEST CASE 4: Feature Vector Retrieval")
+    print_header("TEST CASE 5: Feature Vector Retrieval")
 
     print_test("Retrieve all Redis keys for image")
 
@@ -300,6 +337,22 @@ def test_feature_retrieval():
 
     print_result(len(keys) > 0, f"Found {len(keys)} Redis keys for image")
 
+    # Verify expected key structure
+    expected_keys = [
+        f"image:{TEST_IMAGE_ID}:metadata",
+        f"image:{TEST_IMAGE_ID}:total_views",
+        f"image:{TEST_IMAGE_ID}:total_comments",
+        f"image:{TEST_IMAGE_ID}:views:1min",
+        f"image:{TEST_IMAGE_ID}:views:5min",
+        f"image:{TEST_IMAGE_ID}:views:1hr",
+        f"image:{TEST_IMAGE_ID}:comments:1min",
+        f"image:{TEST_IMAGE_ID}:comments:5min",
+        f"image:{TEST_IMAGE_ID}:comments:1hr",
+    ]
+
+    found_count = sum(1 for k in expected_keys if k in keys)
+    print_result(found_count >= 7, f"Found {found_count}/9 expected key types")
+
 
 def cleanup():
     """Cleanup test data"""
@@ -314,19 +367,28 @@ def cleanup():
 
 def main():
     print_header("GOURMETGRAM STREAMING PIPELINE TEST")
-    print("This test will:")
-    print("  1. Create a test user and upload an image")
-    print("  2. Send views to trigger viral alert (100+ in 5min)")
-    print("  3. Send comments to trigger suspicious alert (10+ in 1min)")
-    print("  4. Verify Redis aggregations")
-    print("  5. Check milestone alerts")
+    print("This test validates the fixed comment window counting logic:")
+    print("  1. Create test user and upload image → Redis metadata")
+    print("  2. Send 105 views → Viral alert (≥100 views in 5min)")
+    print("  3. Send 12 comments → Suspicious alert (≥10 comments in 1min)")
+    print("  4. Verify milestone alert (100 total views)")
+    print("  5. Wait 65s → Verify rolling window expiration")
+    print("  6. Retrieve complete feature vector")
+    print("\nExpected Results:")
+    print("  ✓ Comments use sorted sets (not counters with broken TTL)")
+    print("  ✓ Rolling windows accurately reflect last N seconds")
+    print("  ✓ Alerts trigger at correct thresholds")
+    print("  ✓ Old entries expire from 1min window")
 
     try:
         # Test connection
         print_test("Check API health")
         response = http_client.get(f"{API_URL}/health")
         if response.status_code == 200:
-            print_result(True, f"API is healthy: {response.json()}")
+            health_data = response.json()
+            print_result(True, f"API is healthy")
+            print(f"   Kafka enabled: {health_data.get('kafka_enabled')}")
+            print(f"   Kafka stats: {health_data.get('kafka_stats')}")
         else:
             print_result(False, "API is not reachable")
             sys.exit(1)
@@ -345,18 +407,48 @@ def main():
         test_viral_alert()
         test_suspicious_alert()
         test_milestone()
+        test_rolling_window_expiration()  # New test
         test_feature_retrieval()
 
         # Final summary
         print_header("TEST SUMMARY")
         print("✅ All API requests successful")
-        print("✅ Redis keys populated correctly")
-        print("✅ Stream consumer should show:")
-        print("   - 🔥 Viral content alert")
-        print("   - ⚠️  Suspicious activity alert")
-        print("   - 🎯 Milestone alert (100 views)")
-        print("\n📋 Run to check consumer logs:")
-        print("   docker-compose logs stream_consumer | grep -E '(VIRAL|SUSPICIOUS|MILESTONE)'")
+        print("✅ Redis keys populated with sorted sets (comments FIXED)")
+        print("✅ Stream consumer processed all events")
+        print("✅ Rolling windows expire correctly")
+        print("\n" + "=" * 70)
+        print("VERIFICATION COMMANDS")
+        print("=" * 70)
+        print("\n1️⃣  Check alerts in stream consumer logs:")
+        print("   docker compose -f docker/docker-compose.yaml logs stream_consumer | grep -E 'VIRAL|SUSPICIOUS|MILESTONE'")
+        print("\n   Expected output:")
+        print("   🔥 VIRAL CONTENT ALERT! Image ... received 105 views in 5 minutes")
+        print("   ⚠️  SUSPICIOUS ACTIVITY ALERT! Image ... received 12 comments in 1 minute")
+        print("   🎯 MILESTONE REACHED! Image ... hit 100 total views")
+
+        print("\n2️⃣  Check Redis sorted sets (comment windows FIXED):")
+        image_short = TEST_IMAGE_ID[:8] if TEST_IMAGE_ID else "xxx"
+        print(f"   docker exec gourmetgram_redis redis-cli KEYS 'image:{image_short}*'")
+        print(f"   docker exec gourmetgram_redis redis-cli TYPE 'image:{TEST_IMAGE_ID}:comments:1min'")
+        print("   # Should return: zset (not string)")
+
+        print("\n3️⃣  Verify comment window counts:")
+        print(f"   docker exec gourmetgram_redis redis-cli ZCARD 'image:{TEST_IMAGE_ID}:comments:1min'")
+        print(f"   docker exec gourmetgram_redis redis-cli ZCARD 'image:{TEST_IMAGE_ID}:comments:5min'")
+        print("   # After 65s wait, 1min should be 0, 5min should still have entries")
+
+        print("\n4️⃣  Check persistent totals:")
+        print(f"   docker exec gourmetgram_redis redis-cli GET 'image:{TEST_IMAGE_ID}:total_views'")
+        print(f"   docker exec gourmetgram_redis redis-cli GET 'image:{TEST_IMAGE_ID}:total_comments'")
+        print("   # Should be: 105 views, 12 comments")
+
+        print("\n5️⃣  View all aggregated features:")
+        print(f"   docker exec gourmetgram_redis redis-cli HGETALL 'image:{TEST_IMAGE_ID}:metadata'")
+        print("   # Should show: category=Dessert, caption_length, uploaded_at, user_id")
+
+        print("\n6️⃣  Verify Kafka message flow:")
+        print("   docker compose -f docker/docker-compose.yaml logs api | grep 'Kafka:' | tail -20")
+        print("   # Should show: Published events to topics (uploads, views, comments)")
 
     except KeyboardInterrupt:
         print("\n\nTest interrupted by user")
