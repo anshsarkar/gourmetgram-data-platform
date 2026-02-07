@@ -44,7 +44,8 @@ async def health_check():
     """Health check endpoint for container orchestration"""
     return {
         "status": "healthy",
-        "kafka_enabled": kafka_producer.enabled
+        "kafka_enabled": kafka_producer.enabled,
+        "kafka_stats": kafka_producer.get_stats()
     }
 
 # --- Users ---
