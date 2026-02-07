@@ -225,6 +225,13 @@ services:
       context: ../data_generator
       dockerfile: Dockerfile
     container_name: gourmetgram_generator
+    environment:
+      - GENERATOR_API_URL=http://api:8000
+      - GENERATOR_DATASET_PATH=/data/Food-11
+      - GENERATOR_ARRIVAL_RATE=150.0
+      - GENERATOR_INITIAL_USERS=10
+      - GENERATOR_INITIAL_IMAGES=20
+      - GENERATOR_LOG_LEVEL=INFO
     depends_on:
       api:
         condition: service_healthy

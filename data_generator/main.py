@@ -9,37 +9,32 @@ from pathlib import Path
 from typing import Optional
 
 import numpy as np
-from pydantic_settings import BaseSettings
 
 from .event_generators import GourmetGramEventGenerators
 
 
-class Config(BaseSettings):
+class Config:
     """Simple configuration for data generator"""
 
-    # API Configuration
-    api_url: str = "http://localhost:8000"
+    def __init__(self):
+        # API Configuration
+        self.api_url = os.getenv("GENERATOR_API_URL", "http://localhost:8000")
 
-    # Dataset Configuration
-    dataset_path: str = "/data/Food-11"
+        # Dataset Configuration
+        self.dataset_path = os.getenv("GENERATOR_DATASET_PATH", "/data/Food-11")
 
-    # Traffic Generation
-    arrival_rate: float = 150.0  # Total events per hour
+        # Traffic Generation
+        self.arrival_rate = float(os.getenv("GENERATOR_ARRIVAL_RATE", "150.0"))
 
-    # Bootstrap Configuration
-    initial_users: int = 0
-    initial_images: int = 0
+        # Bootstrap Configuration
+        self.initial_users = int(os.getenv("GENERATOR_INITIAL_USERS", "0"))
+        self.initial_images = int(os.getenv("GENERATOR_INITIAL_IMAGES", "0"))
 
-    # HTTP Configuration
-    request_timeout: float = 30.0
+        # HTTP Configuration
+        self.request_timeout = float(os.getenv("GENERATOR_REQUEST_TIMEOUT", "30.0"))
 
-    # Logging Configuration
-    log_level: str = "INFO"
-
-    class Config:
-        env_file = ".env"
-        env_prefix = "GENERATOR_"
-        case_sensitive = False
+        # Logging Configuration
+        self.log_level = os.getenv("GENERATOR_LOG_LEVEL", "INFO")
 
 
 

@@ -20,14 +20,9 @@ class KafkaProducerManager:
             self.producer = AIOKafkaProducer(
                 bootstrap_servers=self.bootstrap_servers,
                 value_serializer=lambda v: json.dumps(v).encode('utf-8'),
-                # Fire-and-forget configuration
                 acks=1,  # Wait for leader acknowledgment
-                max_in_flight_requests_per_connection=5,
-                # Enable idempotence to prevent duplicates
-                enable_idempotence=True,
-                # Timeout settings
-                request_timeout_ms=30000,
-                api_version='auto'
+                compression_type='gzip',  # Compress messages
+                request_timeout_ms=30000
             )
 
             await self.producer.start()
