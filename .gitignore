@@ -8,6 +8,7 @@ __pycache__/
 
 readmes
 plan.md
+inference_demo/*.md
 .DS_Store
 # Distribution / packaging
 .Python
