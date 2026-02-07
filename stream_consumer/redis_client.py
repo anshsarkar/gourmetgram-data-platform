@@ -49,14 +49,21 @@ class RedisClient:
             self.connection_pool.disconnect()
             logger.info("Redis connection closed")
 
-    # Add to sorted set and set TTL on the key
+    # Add to sorted set and set TTL on the key (atomic via pipeline)
     def zadd_with_ttl(self, key: str, score: float, value: str, ttl: int):
         try:
             pipeline = self.client.pipeline()
             pipeline.zadd(key, {value: score})
             pipeline.expire(key, ttl)
-            pipeline.execute()
-            return True
+            results = pipeline.execute()
+
+            # Verify both operations succeeded
+            if results[0] is not None and results[1]:
+                return True
+            else:
+                logger.warning(f"Partial success in zadd_with_ttl for key {key}: zadd={results[0]}, expire={results[1]}")
+                return False
+
         except RedisError as e:
             logger.error(f"Error in zadd_with_ttl for key {key}: {e}")
             return False
@@ -77,14 +84,28 @@ class RedisClient:
             logger.error(f"Error in zcount for key {key}: {e}")
             return 0
 
-    # Increment counter and set TTL
+    # Increment counter and set TTL only if key is new (doesn't reset TTL on existing keys)
     def incr_with_ttl(self, key: str, ttl: int) -> int:
+        """
+        Increment counter and set TTL only if the key is new.
+        This prevents TTL from being reset on every increment.
+
+        Returns the new counter value.
+        """
         try:
             pipeline = self.client.pipeline()
             pipeline.incr(key)
-            pipeline.expire(key, ttl)
+            pipeline.ttl(key)  # Check current TTL
             result = pipeline.execute()
-            return result[0]
+
+            new_value = result[0]
+            current_ttl = result[1]
+
+            # Only set TTL if key has no expiration (-1) or doesn't exist (-2)
+            if current_ttl == -1 or current_ttl == -2:
+                self.client.expire(key, ttl)
+
+            return new_value
         except RedisError as e:
             logger.error(f"Error in incr_with_ttl for key {key}: {e}")
             return 0

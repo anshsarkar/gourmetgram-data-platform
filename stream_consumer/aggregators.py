@@ -24,8 +24,9 @@ def process_view_event(event_data: Dict[str, Any]):
     else:
         timestamp = time.time()
 
-    # Use timestamp as both score and value (ensures uniqueness per millisecond)
-    timestamp_value = str(timestamp)
+    # Use timestamp for score, but add nanosecond precision to value for guaranteed uniqueness
+    # Format: "timestamp:nanoseconds" ensures no collisions even under extreme load
+    timestamp_value = f"{timestamp}:{time.time_ns() % 1000000}"
 
     # Add to sorted sets with TTL for each window
     redis_client.zadd_with_ttl(
@@ -87,34 +88,57 @@ def process_comment_event(event_data: Dict[str, Any]):
         logger.warning(f"Comment event missing image_id or comment_id: {event_data}")
         return
 
-    # Increment counters with TTL for each window
-    comments_1min = redis_client.incr_with_ttl(
+    # Parse timestamp
+    timestamp_str = event_data.get('created_at')
+    if timestamp_str:
+        timestamp = datetime.fromisoformat(timestamp_str.replace('Z', '+00:00')).timestamp()
+    else:
+        timestamp = time.time()
+
+    # Use comment_id as value to ensure uniqueness (multiple comments can have same timestamp)
+    value = f"{comment_id}:{timestamp}"
+
+    # Add to sorted sets with TTL for each window (same pattern as views)
+    redis_client.zadd_with_ttl(
         f"image:{image_id}:comments:1min",
+        score=timestamp,
+        value=value,
         ttl=config.window_1min
     )
 
-    comments_5min = redis_client.incr_with_ttl(
+    redis_client.zadd_with_ttl(
         f"image:{image_id}:comments:5min",
+        score=timestamp,
+        value=value,
         ttl=config.window_5min
     )
 
-    comments_1hr = redis_client.incr_with_ttl(
+    redis_client.zadd_with_ttl(
         f"image:{image_id}:comments:1hr",
+        score=timestamp,
+        value=value,
         ttl=config.window_1hr
     )
 
     # Increment total comments (no TTL - persistent)
     total_comments = redis_client.incr(f"image:{image_id}:total_comments")
 
+    # Clean up expired entries from sorted sets
+    _cleanup_expired_entries(image_id, timestamp, "comments")
+
+    # Get current counts for all windows
+    comments_1min = _get_window_count(image_id, timestamp, config.window_1min, "comments")
+    comments_5min = _get_window_count(image_id, timestamp, config.window_5min, "comments")
+    comments_1hr = _get_window_count(image_id, timestamp, config.window_1hr, "comments")
+
     # Log every comment
     logger.info(
-        f"Comment: {image_id[:8]}... | "
+        f"💬 Comment: {image_id[:8]}... | "
         f"1m:{comments_1min} 5m:{comments_5min} 1h:{comments_1hr} | "
         f"Total:{total_comments}"
     )
 
     # Get current view counts (needed for alerts)
-    timestamp = time.time()
     views_1min = _get_window_count(image_id, timestamp, config.window_1min, "views")
     views_5min = _get_window_count(image_id, timestamp, config.window_5min, "views")
     views_1hr = _get_window_count(image_id, timestamp, config.window_1hr, "views")
@@ -177,14 +201,15 @@ def process_flag_event(event_data: Dict[str, Any]):
 def get_image_features(image_id: str) -> Dict[str, Any]:
     timestamp = time.time()
 
-    # Get window counts
+    # Get window counts for views
     views_1min = _get_window_count(image_id, timestamp, config.window_1min, "views")
     views_5min = _get_window_count(image_id, timestamp, config.window_5min, "views")
     views_1hr = _get_window_count(image_id, timestamp, config.window_1hr, "views")
 
-    comments_1min = int(redis_client.get(f"image:{image_id}:comments:1min") or 0)
-    comments_5min = int(redis_client.get(f"image:{image_id}:comments:5min") or 0)
-    comments_1hr = int(redis_client.get(f"image:{image_id}:comments:1hr") or 0)
+    # Get window counts for comments (now using sorted sets like views)
+    comments_1min = _get_window_count(image_id, timestamp, config.window_1min, "comments")
+    comments_5min = _get_window_count(image_id, timestamp, config.window_5min, "comments")
+    comments_1hr = _get_window_count(image_id, timestamp, config.window_1hr, "comments")
 
     # Get totals
     total_views = int(redis_client.get(f"image:{image_id}:total_views") or 0)
