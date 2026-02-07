@@ -26,8 +26,8 @@ class StreamConsumer:
                 auto_offset_reset='earliest',  # Start from beginning if no offset stored
                 enable_auto_commit=config.consumer_auto_commit,
                 max_poll_records=config.consumer_max_poll_records,
-                value_deserializer=lambda m: json.loads(m.decode('utf-8')),
-                consumer_timeout_ms=1000  # Timeout for polling (allows graceful shutdown)
+                value_deserializer=lambda m: json.loads(m.decode('utf-8'))
+                # No consumer_timeout_ms - keep polling indefinitely
             )
 
             logger.info(f"Kafka consumer connected")
