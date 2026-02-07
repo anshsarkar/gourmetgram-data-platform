@@ -4,9 +4,9 @@ import time
 from typing import Dict, Any
 from datetime import datetime
 
-from .config import config
-from .redis_client import redis_client
-from .alert_manager import check_and_alert
+from config import config
+from redis_client import redis_client
+from alert_manager import check_and_alert
 
 logger = logging.getLogger(__name__)
 

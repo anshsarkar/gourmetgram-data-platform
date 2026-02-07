@@ -5,7 +5,7 @@ from typing import Dict, Any, List, Callable
 from kafka import KafkaConsumer
 from kafka.errors import KafkaError
 
-from .config import config
+from config import config
 
 logger = logging.getLogger(__name__)
 

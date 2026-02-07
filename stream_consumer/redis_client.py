@@ -5,7 +5,7 @@ from typing import Optional, List, Dict, Any
 import redis
 from redis.exceptions import RedisError, ConnectionError as RedisConnectionError
 
-from .config import config
+from config import config
 
 logger = logging.getLogger(__name__)
 
