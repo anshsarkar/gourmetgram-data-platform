@@ -16,8 +16,6 @@ logger = logging.getLogger(__name__)
 
 
 class FeatureFetcher:
-    """Fetches real-time features from Redis and metadata from Postgres"""
-
     def __init__(self):
         # Redis client
         self.redis_client = redis.Redis(
@@ -33,14 +31,6 @@ class FeatureFetcher:
         logger.info(f"FeatureFetcher initialized (Redis: {config.redis_host}:{config.redis_port})")
 
     def fetch_redis_features(self, image_id: str) -> Dict[str, Any]:
-        """
-        Fetch real-time aggregates from Redis.
-
-        Uses ZCOUNT for rolling window queries (sorted sets).
-        Uses GET for persistent counters.
-
-        Returns dict with window counts, totals, and latency.
-        """
         start_time = time.time()
         current_timestamp = time.time()
 
@@ -90,11 +80,6 @@ class FeatureFetcher:
         return features
 
     def _get_window_count(self, image_id: str, current_timestamp: float, window_size: int, metric_type: str) -> int:
-        """
-        Get count of events within a time window using ZCOUNT.
-
-        Same logic as stream_consumer/aggregators.py
-        """
         window_start = current_timestamp - window_size
 
         # Build key name (match stream_consumer naming)
@@ -115,15 +100,6 @@ class FeatureFetcher:
             return 0
 
     def fetch_postgres_metadata(self, image_id: str) -> Dict[str, Any]:
-        """
-        Fetch static metadata and user stats from Postgres.
-
-        Queries:
-        - Image metadata (category, caption, uploaded_at)
-        - User history (total uploads, account age)
-
-        Returns dict with metadata and latency.
-        """
         start_time = time.time()
         features = {}
 
@@ -253,7 +229,6 @@ class FeatureFetcher:
         return all_features
 
     def close(self):
-        """Close connections"""
         if self.redis_client:
             self.redis_client.close()
         if self.db_conn:

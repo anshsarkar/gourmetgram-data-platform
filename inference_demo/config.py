@@ -1,7 +1,4 @@
 #!/usr/bin/env python3
-"""
-Configuration for Real-Time Inference Demo
-"""
 import os
 
 class Config:

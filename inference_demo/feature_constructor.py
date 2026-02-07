@@ -21,20 +21,6 @@ class FeatureConstructor:
         logger.info(f"FeatureConstructor initialized ({len(self.feature_names)} features)")
 
     def construct_feature_vector(self, raw_features: Dict[str, Any]) -> np.ndarray:
-        """
-        Convert raw features to 31-dimensional feature vector.
-
-        Feature Vector Structure (31 dimensions):
-        [0-3]:   Temporal (4)
-        [4-6]:   Totals (3)
-        [7-12]:  Windows (6)
-        [13-15]: Ratios (3)
-        [16-17]: Content (2)
-        [18-19]: User (2)
-        [20-30]: Category One-Hot (11)
-
-        Returns numpy array of shape (31,)
-        """
         features = []
 
         # === Temporal Features (4) ===
@@ -139,19 +125,9 @@ class FeatureConstructor:
         return feature_vector
 
     def get_feature_names(self) -> List[str]:
-        """Return ordered list of feature names matching vector positions"""
         return self.feature_names.copy()
 
     def format_feature_summary(self, feature_vector: np.ndarray, compact: bool = False) -> str:
-        """
-        Pretty-print feature vector with names and values.
-
-        Args:
-            feature_vector: 30-dimensional numpy array
-            compact: If True, show only non-zero features
-
-        Returns formatted string
-        """
         if len(feature_vector) != len(self.feature_names):
             return f"Error: Feature vector has {len(feature_vector)} dims, expected {len(self.feature_names)}"
 

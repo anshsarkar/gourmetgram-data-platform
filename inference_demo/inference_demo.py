@@ -6,6 +6,9 @@ import sys
 import argparse
 import logging
 import time
+import csv
+from pathlib import Path
+from datetime import datetime
 from typing import Optional, Dict, Any
 import psycopg2
 from tabulate import tabulate
@@ -125,7 +128,7 @@ def display_results(results: Dict[str, Any], constructor: FeatureConstructor, sh
     print("=" * 70)
 
     # Latency breakdown
-    print("\n📊 Feature Retrieval:")
+    print("\nFeature Retrieval:")
     print(f"   Redis fetch:            {latency['redis_ms']:6.2f} ms")
     print(f"   Postgres fetch:         {latency['postgres_ms']:6.2f} ms")
     print(f"   Feature construction:   {latency['feature_construction_ms']:6.2f} ms")
@@ -135,18 +138,18 @@ def display_results(results: Dict[str, Any], constructor: FeatureConstructor, sh
 
     # Latency check
     if latency['total_ms'] < 50:
-        print(" ✅ (target: <50ms)")
+        print(" [OK] (target: <50ms)")
     else:
-        print(" ⚠️  (target: <50ms)")
+        print(" [WARNING] (target: <50ms)")
 
     # Feature vector
     if show_features:
-        print("\n📈 Feature Vector (31 dimensions):")
+        print("\nFeature Vector (31 dimensions):")
         print(constructor.format_feature_summary(feature_vector, compact=False))
 
     else:
         # Show compact summary
-        print("\n📈 Key Features:")
+        print("\nKey Features:")
         feature_dict = constructor.get_feature_dict(feature_vector)
 
         # Select interesting features to display
@@ -172,17 +175,17 @@ def display_results(results: Dict[str, Any], constructor: FeatureConstructor, sh
                 break
 
     # Prediction
-    print("\n🤖 Prediction:")
+    print("\nPrediction:")
     prob = prediction['moderation_probability']
     rec = prediction['recommendation']
 
-    # Color code recommendation
+    # Format recommendation
     if rec == "SAFE":
-        rec_display = f"✅ {rec}"
+        rec_display = f"[OK] {rec}"
     elif rec == "REVIEW":
-        rec_display = f"⚠️  {rec}"
+        rec_display = f"[WARN] {rec}"
     else:
-        rec_display = f"🚫 {rec}"
+        rec_display = f"[FLAG] {rec}"
 
     print(f"   Moderation Probability: {prob:.3f}")
     print(f"   Recommendation: {rec_display}")
@@ -199,11 +202,43 @@ def display_results(results: Dict[str, Any], constructor: FeatureConstructor, sh
     print("\n" + "=" * 70)
 
 
+def save_features_to_csv(results: Dict[str, Any], constructor: FeatureConstructor, csv_path: str):
+    # Prepare row data
+    feature_dict = constructor.get_feature_dict(results['feature_vector'])
+    prediction = results['prediction']
+
+    row = {
+        'timestamp': datetime.now().isoformat(),
+        'image_id': results['image_id'],
+        # Add all 31 features
+        **feature_dict,
+        # Add prediction results
+        'moderation_probability': prediction['moderation_probability'],
+        'recommendation': prediction['recommendation'],
+        # Add latency metrics
+        'total_latency_ms': results['latency']['total_ms'],
+        'redis_latency_ms': results['latency']['redis_ms'],
+        'postgres_latency_ms': results['latency']['postgres_ms']
+    }
+
+    # Check if file exists to determine if we need headers
+    file_exists = Path(csv_path).exists()
+
+    # Write to CSV
+    with open(csv_path, 'a', newline='') as f:
+        writer = csv.DictWriter(f, fieldnames=row.keys())
+
+        # Write header if new file
+        if not file_exists:
+            writer.writeheader()
+
+        writer.writerow(row)
+
+    print(f"\nFeatures saved to: {csv_path}")
+
+
 def run_latency_benchmark(n_runs: int, image_id: str, fetcher: FeatureFetcher, constructor: FeatureConstructor, predictor: HeuristicModerationPredictor):
-    """
-    Run inference N times and report latency statistics.
-    """
-    print(f"\n🔬 Running latency benchmark ({n_runs} iterations)...")
+    print(f"\nRunning latency benchmark ({n_runs} iterations)...")
 
     latencies = []
 
@@ -222,7 +257,7 @@ def run_latency_benchmark(n_runs: int, image_id: str, fetcher: FeatureFetcher, c
     import numpy as np
     latencies = np.array(latencies)
 
-    print("\n📊 Latency Statistics:")
+    print("\nLatency Statistics:")
     print(f"   Mean:   {np.mean(latencies):.2f} ms")
     print(f"   Median: {np.median(latencies):.2f} ms")
     print(f"   Min:    {np.min(latencies):.2f} ms")
@@ -234,9 +269,9 @@ def run_latency_benchmark(n_runs: int, image_id: str, fetcher: FeatureFetcher, c
     # Check against target
     p99 = np.percentile(latencies, 99)
     if p99 < 50:
-        print(f"\n   ✅ P99 latency ({p99:.2f}ms) meets target (<50ms)")
+        print(f"\n   [OK] P99 latency ({p99:.2f}ms) meets target (<50ms)")
     else:
-        print(f"\n   ⚠️  P99 latency ({p99:.2f}ms) exceeds target (<50ms)")
+        print(f"\n   [WARNING] P99 latency ({p99:.2f}ms) exceeds target (<50ms)")
 
 
 def main():
@@ -270,6 +305,14 @@ def main():
         help="Enable debug logging"
     )
 
+    parser.add_argument(
+        '--save-csv',
+        type=str,
+        metavar='PATH',
+        default='inference_features.csv',
+        help="Path to CSV file for saving features (default: inference_features.csv)"
+    )
+
     args = parser.parse_args()
 
     # Setup logging
@@ -285,31 +328,31 @@ def main():
     print("  ✓ Heuristic-based moderation prediction")
 
     # Initialize components
-    print("\n🔧 Initializing components...")
+    print("\nInitializing components...")
     try:
         fetcher = FeatureFetcher()
         constructor = FeatureConstructor()
         predictor = HeuristicModerationPredictor()
-        print("   ✅ All components initialized")
+        print("   [OK] All components initialized")
     except Exception as e:
-        print(f"   ❌ Initialization failed: {e}")
+        print(f"   [ERROR] Initialization failed: {e}")
         sys.exit(1)
 
     # Get image ID
     if args.image_id:
         image_id = args.image_id
-        print(f"\n📷 Using specified image: {image_id}")
+        print(f"\nUsing specified image: {image_id}")
     else:
-        print("\n🔍 Selecting active image from database...")
+        print("\nSelecting active image from database...")
         image_id = select_active_image(config.database_url)
 
         if not image_id:
-            print("   ❌ No images found with activity. Please run the streaming test first.")
+            print("   [ERROR] No images found with activity. Please run the streaming test first.")
             print("\n   Hint: ./tests/run_test.sh")
             fetcher.close()
             sys.exit(1)
 
-        print(f"   ✅ Selected image: {image_id}")
+        print(f"   [OK] Selected image: {image_id}")
 
     # Run inference
     if args.latency_test:
@@ -318,20 +361,23 @@ def main():
 
     else:
         # Single inference mode
-        print("\n🚀 Running inference pipeline...")
+        print("\nRunning inference pipeline...")
         results = run_inference(image_id, fetcher, constructor, predictor)
 
         if 'error' in results:
-            print(f"\n❌ Inference failed: {results['error']}")
+            print(f"\n[ERROR] Inference failed: {results['error']}")
             fetcher.close()
             sys.exit(1)
 
         # Display results
         display_results(results, constructor, show_features=args.show_features)
 
+        # Save to CSV
+        save_features_to_csv(results, constructor, args.save_csv)
+
     # Cleanup
     fetcher.close()
-    print("\n✅ Inference demo complete!\n")
+    print("\n[OK] Inference demo complete!\n")
 
 
 if __name__ == "__main__":
