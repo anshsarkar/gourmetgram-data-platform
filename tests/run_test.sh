@@ -1,5 +1,6 @@
 #!/bin/bash
 
+# Copy this script to the root of the project and run it to execute the streaming pipeline test
 echo "=========================================="
 echo "GourmetGram Streaming Pipeline Test"
 echo "=========================================="

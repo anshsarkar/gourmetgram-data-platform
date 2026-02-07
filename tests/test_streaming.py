@@ -10,7 +10,7 @@ Tests:
 5. Suspicious alert (10+ comments in 1 min)
 6. Milestone alert (100 views total)
 """
-
+# Copy to main folder and then run using the bash script:
 import time
 import httpx
 import redis
