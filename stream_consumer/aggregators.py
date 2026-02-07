@@ -7,6 +7,7 @@ from datetime import datetime
 from config import config
 from redis_client import redis_client
 from alert_manager import check_and_alert
+from db_client import db_client
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +53,15 @@ def process_view_event(event_data: Dict[str, Any]):
 
     # Increment total views (no TTL - persistent)
     total_views = redis_client.incr(f"image:{image_id}:total_views")
+
+    # Check if milestone reached and persist to database
+    if total_views in config.view_milestones:
+        db_client.persist_milestone(
+            image_id=image_id,
+            milestone_type="views",
+            milestone_value=total_views,
+            reached_at=timestamp
+        )
 
     # Clean up expired entries from sorted sets
     _cleanup_expired_entries(image_id, timestamp, "views")

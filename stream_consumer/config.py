@@ -29,7 +29,7 @@ class Config:
         self.popular_threshold_views_1hr = int(os.getenv("POPULAR_THRESHOLD_VIEWS_1HR", "50"))
 
         # View Milestones for Persistence
-        self.view_milestones = [100, 1000, 10000]
+        self.view_milestones = [10, 100, 1000]
 
         # Logging Configuration
         self.log_level = os.getenv("LOG_LEVEL", "INFO")

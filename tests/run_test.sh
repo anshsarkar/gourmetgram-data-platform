@@ -1,17 +1,18 @@
 #!/bin/bash
 
 # GourmetGram Streaming Pipeline Test Runner
-# This script validates the fixed comment window counting logic
+# This script validates the complete streaming pipeline including milestone persistence
 
 echo "======================================================================"
-echo "  GourmetGram Streaming Pipeline Test - Comment Windows FIXED"
+echo "  GourmetGram Streaming Pipeline Test - Complete Validation"
 echo "======================================================================"
 echo ""
 echo "What this test validates:"
-echo "  ✓ Comments now use sorted sets (not broken incr_with_ttl)"
+echo "  ✓ Comments use sorted sets (not broken incr_with_ttl)"
 echo "  ✓ Rolling windows accurately count events in last N seconds"
 echo "  ✓ Alert thresholds trigger correctly"
 echo "  ✓ Window entries expire properly after TTL"
+echo "  ✓ Milestones persisted to PostgreSQL database"
 echo ""
 
 # Navigate to docker directory
@@ -66,7 +67,7 @@ if [ -n "$IMAGE_ID" ]; then
     echo ""
     echo "2️⃣  Comment Window Structure (FIXED):"
     echo "   Checking Redis key types..."
-    IMAGE_ID="d45c1c99-f5e5-45fb-911c-ff4eb54617fa"
+    # IMAGE_ID="d45c1c99-f5e5-45fb-911c-ff4eb54617fa"
     COMMENT_KEY_TYPE=$(docker exec gourmetgram_redis redis-cli TYPE "image:${IMAGE_ID}:comments:1min" 2>/dev/null | head -1)
     if [ "$COMMENT_KEY_TYPE" = "zset" ]; then
         echo "   ✅ comments:1min is zset (CORRECT - uses sorted sets now)"
@@ -88,6 +89,17 @@ if [ -n "$IMAGE_ID" ]; then
     echo ""
     echo "4️⃣  Kafka Event Flow:"
     docker compose -f docker/docker-compose.yaml logs api --tail=50 | grep "Kafka:" | tail -10
+
+    echo ""
+    echo "5️⃣  Milestone Persistence to Database:"
+    MILESTONE_COUNT=$(docker exec gourmetgram_db psql -U user -d gourmetgram -t -c "SELECT COUNT(*) FROM image_milestones;" 2>/dev/null | xargs)
+    if [ -n "$MILESTONE_COUNT" ] && [ "$MILESTONE_COUNT" -gt 0 ]; then
+        echo "   ✅ Found $MILESTONE_COUNT milestone(s) in database"
+        docker exec gourmetgram_db psql -U user -d gourmetgram -c "SELECT milestone_value, COUNT(*) FROM image_milestones GROUP BY milestone_value ORDER BY milestone_value;" 2>/dev/null
+    else
+        echo "   ⚠️  No milestones found in database yet"
+        echo "   Check stream_consumer logs: docker compose -f docker/docker-compose.yaml logs stream_consumer | grep 'Milestone persisted'"
+    fi
 else
     echo "⚠️  Could not extract test image ID from logs"
     echo "   Check if stream_consumer is running and processing events"
@@ -108,6 +120,14 @@ echo ""
 echo "To check window counts:"
 echo "  docker exec gourmetgram_redis redis-cli ZCARD 'image:<ID>:comments:1min'"
 echo "  docker exec gourmetgram_redis redis-cli ZCARD 'image:<ID>:views:1min'"
+echo ""
+echo "To verify milestone persistence to database:"
+echo "  docker exec gourmetgram_db psql -U user -d gourmetgram -c 'SELECT COUNT(*) FROM image_milestones;'"
+echo "  docker exec gourmetgram_db psql -U user -d gourmetgram -c 'SELECT milestone_value, COUNT(*) FROM image_milestones GROUP BY milestone_value;'"
+echo "  docker exec gourmetgram_db psql -U user -d gourmetgram -c \"SELECT SUBSTRING(image_id::text, 1, 16), milestone_value, reached_at FROM image_milestones ORDER BY reached_at DESC LIMIT 10;\""
+echo ""
+echo "To check milestone persistence logs:"
+echo "  docker compose -f docker/docker-compose.yaml logs stream_consumer | grep 'Milestone persisted'"
 echo ""
 echo "To see full stream consumer logs:"
 echo "  docker compose -f docker/docker-compose.yaml logs -f stream_consumer"

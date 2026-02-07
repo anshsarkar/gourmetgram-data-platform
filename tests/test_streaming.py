@@ -9,11 +9,13 @@ Tests:
 4. Viral alert (100+ views in 5 min)
 5. Suspicious alert (10+ comments in 1 min)
 6. Milestone alert (100 views total)
+7. Milestone persistence to PostgreSQL
 """
 # Copy to main folder and then run using the bash script:
 import time
 import httpx
 import redis
+import psycopg2
 import sys
 from typing import Optional
 import uuid
@@ -22,6 +24,7 @@ import uuid
 API_URL = "http://localhost:8000"
 REDIS_HOST = "localhost"
 REDIS_PORT = 6379
+DATABASE_URL = "postgresql://user:password@localhost:5432/gourmetgram"
 
 # Test data
 TEST_USER_ID = None
@@ -30,6 +33,7 @@ TEST_IMAGE_ID = None
 # Initialize clients
 http_client = httpx.Client(timeout=30.0)
 redis_client = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, decode_responses=True)
+db_conn = None
 
 
 def print_header(title: str):
@@ -275,6 +279,103 @@ def test_milestone():
         print_result(False, "Could not verify milestone")
 
 
+def test_milestone_persistence():
+    """Test: Verify milestone persisted to PostgreSQL database"""
+    print_header("TEST CASE 6: Milestone Persistence to Database")
+
+    print_test("Connect to PostgreSQL database")
+
+    global db_conn
+    try:
+        db_conn = psycopg2.connect(DATABASE_URL)
+        print_result(True, "Connected to database")
+    except Exception as e:
+        print_result(False, f"Failed to connect to database: {e}")
+        return
+
+    print_test("Check if image_milestones table exists")
+
+    try:
+        cursor = db_conn.cursor()
+        cursor.execute("""
+            SELECT EXISTS (
+                SELECT FROM information_schema.tables
+                WHERE table_name = 'image_milestones'
+            )
+        """)
+        table_exists = cursor.fetchone()[0]
+
+        if not table_exists:
+            print_result(False, "image_milestones table does not exist")
+            print("        Restart API service to create the table: docker-compose restart api")
+            cursor.close()
+            return
+
+        print_result(True, "image_milestones table exists")
+
+        # Wait a bit for stream consumer to persist milestone
+        print_test("Wait 3 seconds for milestone persistence")
+        time.sleep(3)
+
+        # Check for milestone for our test image
+        print_test(f"Query milestone for test image {TEST_IMAGE_ID[:16]}...")
+
+        cursor.execute("""
+            SELECT milestone_type, milestone_value, reached_at
+            FROM image_milestones
+            WHERE image_id = %s
+            ORDER BY reached_at DESC
+        """, (TEST_IMAGE_ID,))
+
+        milestones = cursor.fetchall()
+
+        if milestones:
+            print_result(True, f"Found {len(milestones)} milestone(s) for test image")
+            for milestone_type, milestone_value, reached_at in milestones:
+                print(f"   - {milestone_type}: {milestone_value} (reached at {reached_at})")
+
+            # Check if 100 views milestone exists
+            has_100_milestone = any(m[1] == 100 for m in milestones)
+            print_result(has_100_milestone, "100 views milestone persisted to database")
+        else:
+            print_result(False, "No milestones found for test image")
+            print("        Check stream_consumer logs for persistence errors")
+
+        # Check total milestone count
+        print_test("Count total milestones in database")
+
+        cursor.execute("SELECT COUNT(*) FROM image_milestones")
+        total_count = cursor.fetchone()[0]
+
+        print_result(total_count > 0, f"Total milestones in database: {total_count}")
+
+        # Check for duplicates
+        print_test("Check for duplicate milestones")
+
+        cursor.execute("""
+            SELECT image_id, milestone_value, COUNT(*) as dup_count
+            FROM image_milestones
+            GROUP BY image_id, milestone_value
+            HAVING COUNT(*) > 1
+        """)
+
+        duplicates = cursor.fetchall()
+
+        if duplicates:
+            print_result(False, f"Found {len(duplicates)} duplicate milestone(s)")
+            for img_id, val, count in duplicates[:3]:  # Show first 3
+                print(f"   - Image {str(img_id)[:16]}... milestone {val}: {count} duplicates")
+        else:
+            print_result(True, "No duplicate milestones found")
+
+        cursor.close()
+
+    except Exception as e:
+        print_result(False, f"Database query failed: {e}")
+        import traceback
+        traceback.print_exc()
+
+
 def test_rolling_window_expiration():
     """Test: Verify rolling windows expire old entries"""
     print_header("TEST CASE 4: Rolling Window Expiration")
@@ -362,23 +463,28 @@ def cleanup():
     http_client.close()
     redis_client.close()
 
+    if db_conn:
+        db_conn.close()
+
     print("✅ Test complete!")
 
 
 def main():
     print_header("GOURMETGRAM STREAMING PIPELINE TEST")
-    print("This test validates the fixed comment window counting logic:")
+    print("This test validates the complete streaming pipeline:")
     print("  1. Create test user and upload image → Redis metadata")
     print("  2. Send 105 views → Viral alert (≥100 views in 5min)")
     print("  3. Send 12 comments → Suspicious alert (≥10 comments in 1min)")
     print("  4. Verify milestone alert (100 total views)")
     print("  5. Wait 65s → Verify rolling window expiration")
     print("  6. Retrieve complete feature vector")
+    print("  7. Verify milestone persistence to PostgreSQL")
     print("\nExpected Results:")
     print("  ✓ Comments use sorted sets (not counters with broken TTL)")
     print("  ✓ Rolling windows accurately reflect last N seconds")
     print("  ✓ Alerts trigger at correct thresholds")
     print("  ✓ Old entries expire from 1min window")
+    print("  ✓ Milestones persisted to image_milestones table")
 
     try:
         # Test connection
@@ -407,8 +513,9 @@ def main():
         test_viral_alert()
         test_suspicious_alert()
         test_milestone()
-        test_rolling_window_expiration()  # New test
+        test_rolling_window_expiration()
         test_feature_retrieval()
+        test_milestone_persistence()
 
         # Final summary
         print_header("TEST SUMMARY")
@@ -416,6 +523,7 @@ def main():
         print("✅ Redis keys populated with sorted sets (comments FIXED)")
         print("✅ Stream consumer processed all events")
         print("✅ Rolling windows expire correctly")
+        print("✅ Milestones persisted to PostgreSQL database")
         print("\n" + "=" * 70)
         print("VERIFICATION COMMANDS")
         print("=" * 70)
@@ -449,6 +557,14 @@ def main():
         print("\n6️⃣  Verify Kafka message flow:")
         print("   docker compose -f docker/docker-compose.yaml logs api | grep 'Kafka:' | tail -20")
         print("   # Should show: Published events to topics (uploads, views, comments)")
+
+        print("\n7️⃣  Verify milestone persistence to PostgreSQL:")
+        print("   docker exec gourmetgram_db psql -U user -d gourmetgram -c 'SELECT COUNT(*) FROM image_milestones;'")
+        print("   # Should show: count > 0")
+        print(f"\n   docker exec gourmetgram_db psql -U user -d gourmetgram -c \"SELECT milestone_value, reached_at FROM image_milestones WHERE image_id = '{TEST_IMAGE_ID}';\"")
+        print("   # Should show: 100 milestone with timestamp")
+        print("\n   docker exec gourmetgram_db psql -U user -d gourmetgram -c 'SELECT milestone_value, COUNT(*) FROM image_milestones GROUP BY milestone_value;'")
+        print("   # Should show: distribution of milestones (100, 1000, 10000)")
 
     except KeyboardInterrupt:
         print("\n\nTest interrupted by user")

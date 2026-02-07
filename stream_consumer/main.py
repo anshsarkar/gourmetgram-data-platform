@@ -6,6 +6,7 @@ from typing import Dict, Any
 
 from config import config
 from redis_client import redis_client
+from db_client import db_client
 from kafka_consumer import stream_consumer
 from alert_manager import get_alert_stats
 import aggregators
@@ -70,6 +71,7 @@ def graceful_shutdown(signum, frame):
     # Close connections
     stream_consumer.close()
     redis_client.close()
+    db_client.close()
 
     logger.info("Stream consumer shutdown complete.")
     sys.exit(0)
@@ -87,12 +89,16 @@ def main():
     logger.info(f"Consumer Group: {config.kafka_consumer_group}")
     logger.info(f"Topics: {config.kafka_topics}")
     logger.info(f"Redis: {config.redis_host}:{config.redis_port}")
+    logger.info(f"Database: {config.database_url.split('@')[1] if '@' in config.database_url else 'configured'}")
     logger.info("")
     logger.info("Alert Thresholds:")
     logger.info(f"  Viral content: {config.viral_threshold_views_5min} views/5min")
     logger.info(f"  Suspicious activity: {config.suspicious_threshold_comments_1min} comments/1min")
     logger.info(f"  Popular post: {config.popular_threshold_views_1hr} views/1hr")
+    logger.info("")
+    logger.info("Milestone Persistence:")
     logger.info(f"  View milestones: {config.view_milestones}")
+    logger.info(f"  Database table: image_milestones")
     logger.info("=" * 70)
     logger.info("")
 
@@ -104,6 +110,10 @@ def main():
         # Connect to Redis
         logger.info("Connecting to Redis...")
         redis_client.connect()
+
+        # Connect to database for milestone persistence
+        logger.info("Connecting to PostgreSQL...")
+        db_client.connect()
 
         # Connect to Kafka
         logger.info("Connecting to Kafka...")

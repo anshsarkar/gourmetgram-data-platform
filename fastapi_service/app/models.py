@@ -57,3 +57,14 @@ class Flag(Base):
     user = relationship("User", back_populates="flags")
     image = relationship("Image", back_populates="flags")
     comment = relationship("Comment", back_populates="flags")
+
+class ImageMilestone(Base):
+    __tablename__ = "image_milestones"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    image_id = Column(UUID(as_uuid=True), ForeignKey("images.id"), nullable=False)
+    milestone_type = Column(String, nullable=False)
+    milestone_value = Column(Integer, nullable=False)
+    reached_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    image = relationship("Image")
