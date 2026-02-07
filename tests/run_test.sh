@@ -55,7 +55,8 @@ echo "======================================================================"
 echo ""
 
 # Extract image ID from test output (if test completed)
-IMAGE_ID=$(docker compose -f docker/docker-compose.yaml logs stream_consumer --tail=200 | grep -oE "Upload: [a-f0-9]{8}" | head -1 | cut -d' ' -f2)
+# Full UUID format: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx (36 chars with dashes)
+IMAGE_ID=$(docker compose -f docker/docker-compose.yaml logs stream_consumer --tail=200 | grep -oE "[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}" | head -1)
 
 if [ -n "$IMAGE_ID" ]; then
     echo "📊 Test Image ID: $IMAGE_ID..."

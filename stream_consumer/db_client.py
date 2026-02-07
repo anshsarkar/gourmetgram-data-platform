@@ -72,16 +72,16 @@ class DatabaseClient:
                 from datetime import datetime
                 reached_at_dt = datetime.fromtimestamp(reached_at)
 
-                # Generate UUID for milestone
-                milestone_id = uuid.uuid4()
+                # Generate UUID for milestone (convert to string for psycopg2)
+                milestone_id = str(uuid.uuid4())
 
-                # Insert milestone
+                # Insert milestone (ensure image_id is also a string)
                 cursor.execute(
                     """
                     INSERT INTO image_milestones (id, image_id, milestone_type, milestone_value, reached_at)
                     VALUES (%s, %s, %s, %s, %s)
                     """,
-                    (milestone_id, image_id, milestone_type, milestone_value, reached_at_dt)
+                    (milestone_id, str(image_id), milestone_type, milestone_value, reached_at_dt)
                 )
 
                 self.conn.commit()
