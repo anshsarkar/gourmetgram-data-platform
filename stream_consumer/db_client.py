@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import logging
 import time
+import uuid
 from typing import Optional
 import psycopg2
 from psycopg2.extras import execute_values
@@ -71,13 +72,16 @@ class DatabaseClient:
                 from datetime import datetime
                 reached_at_dt = datetime.fromtimestamp(reached_at)
 
+                # Generate UUID for milestone
+                milestone_id = uuid.uuid4()
+
                 # Insert milestone
                 cursor.execute(
                     """
-                    INSERT INTO image_milestones (image_id, milestone_type, milestone_value, reached_at)
-                    VALUES (%s, %s, %s, %s)
+                    INSERT INTO image_milestones (id, image_id, milestone_type, milestone_value, reached_at)
+                    VALUES (%s, %s, %s, %s, %s)
                     """,
-                    (image_id, milestone_type, milestone_value, reached_at_dt)
+                    (milestone_id, image_id, milestone_type, milestone_value, reached_at_dt)
                 )
 
                 self.conn.commit()

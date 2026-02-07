@@ -68,14 +68,14 @@ if [ -n "$IMAGE_ID" ]; then
     echo "2️⃣  Comment Window Structure (FIXED):"
     echo "   Checking Redis key types..."
     # IMAGE_ID="d45c1c99-f5e5-45fb-911c-ff4eb54617fa"
-    COMMENT_KEY_TYPE=$(docker exec gourmetgram_redis redis-cli TYPE "image:${IMAGE_ID}:comments:1min" 2>/dev/null | head -1)
+    COMMENT_KEY_TYPE=$(docker exec gourmetgram_redis redis-cli TYPE image:${IMAGE_ID}:comments:1min 2>/dev/null | xargs)
     if [ "$COMMENT_KEY_TYPE" = "zset" ]; then
         echo "   ✅ comments:1min is zset (CORRECT - uses sorted sets now)"
     else
         echo "   ❌ comments:1min is $COMMENT_KEY_TYPE (WRONG - should be zset)"
     fi
 
-    COMMENT_KEY_TYPE=$(docker exec gourmetgram_redis redis-cli TYPE "image:${IMAGE_ID}:comments:5min" 2>/dev/null | head -1)
+    COMMENT_KEY_TYPE=$(docker exec gourmetgram_redis redis-cli TYPE image:${IMAGE_ID}:comments:5min 2>/dev/null | xargs)
     if [ "$COMMENT_KEY_TYPE" = "zset" ]; then
         echo "   ✅ comments:5min is zset (CORRECT - uses sorted sets now)"
     else
