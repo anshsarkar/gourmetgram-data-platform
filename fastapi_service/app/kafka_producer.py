@@ -22,7 +22,6 @@ class KafkaProducerManager:
                 value_serializer=lambda v: json.dumps(v).encode('utf-8'),
                 # Fire-and-forget configuration
                 acks=1,  # Wait for leader acknowledgment
-                retries=3,  # Retry failed sends
                 max_in_flight_requests_per_connection=5,
                 # Enable idempotence to prevent duplicates
                 enable_idempotence=True,

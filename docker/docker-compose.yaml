@@ -212,6 +212,12 @@ services:
         condition: service_healthy
     volumes:
       - ../fastapi_service/app:/code/app
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
 
   # Data Generator
   data_generator:
@@ -221,7 +227,7 @@ services:
     container_name: gourmetgram_generator
     depends_on:
       api:
-        condition: service_started
+        condition: service_healthy
       transform-data:
         condition: service_completed_successfully
     volumes:

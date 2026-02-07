@@ -38,6 +38,15 @@ async def shutdown_event():
     # Stop Kafka producer gracefully
     await kafka_producer.stop()
 
+# --- Health Check ---
+@app.get("/health")
+async def health_check():
+    """Health check endpoint for container orchestration"""
+    return {
+        "status": "healthy",
+        "kafka_enabled": kafka_producer.enabled
+    }
+
 # --- Users ---
 @app.post("/users/", response_model=schemas.UserResponse)
 def create_user(user: schemas.UserCreate, db: Session = Depends(database.get_db)):
