@@ -54,9 +54,8 @@ echo "  Post-Test Verification"
 echo "======================================================================"
 echo ""
 
-# Extract image ID from test output (if test completed)
-# Full UUID format: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx (36 chars with dashes)
-IMAGE_ID=$(docker compose -f docker/docker-compose.yaml logs stream_consumer --tail=200 | grep -oE "[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}" | head -1)
+# Get most recent image ID directly from database (most reliable)
+IMAGE_ID=$(docker exec gourmetgram_db psql -U user -d gourmetgram -t -c "SELECT id FROM images ORDER BY uploaded_at DESC LIMIT 1;" 2>/dev/null | xargs)
 
 if [ -n "$IMAGE_ID" ]; then
     echo "📊 Test Image ID: $IMAGE_ID..."
