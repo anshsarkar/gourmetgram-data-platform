@@ -12,10 +12,8 @@ import numpy as np
 
 from .event_generators import GourmetGramEventGenerators
 
-
+# Config for data generator
 class Config:
-    """Simple configuration for data generator"""
-
     def __init__(self):
         # API Configuration
         self.api_url = os.getenv("GENERATOR_API_URL", "http://localhost:8000")
@@ -96,7 +94,6 @@ class PoissonEventGenerator:
         )
 
 def setup_logging(log_level: str):
-    """Configure logging with proper formatting."""
     level = getattr(logging, log_level.upper(), logging.INFO)
 
     logging.basicConfig(
@@ -201,7 +198,6 @@ async def main():
 
     # Start periodic stats reporting
     async def print_stats_periodically():
-        """Print statistics every 5 minutes."""
         while not shutdown_event.is_set():
             await asyncio.sleep(300)  # 5 minutes
             if not shutdown_event.is_set():
@@ -211,7 +207,7 @@ async def main():
 
     # Run generator
     try:
-        logger.info("🚀 Generator is running! Press Ctrl+C to stop.")
+        logger.info("Generator is running! Press Ctrl+C to stop.")
         logger.info("")
 
         # Start generator

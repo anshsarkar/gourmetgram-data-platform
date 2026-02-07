@@ -54,7 +54,6 @@ class KafkaProducerManager:
                 logger.error(f"Error stopping Kafka producer: {e}")
 
     def get_stats(self) -> Dict[str, Any]:
-        """Return current statistics"""
         return {
             "enabled": self.enabled,
             "total_events": self.event_count,
@@ -77,16 +76,16 @@ class KafkaProducerManager:
             # Log every event at INFO level with details
             event_type = event_data.get('event_type', 'unknown')
             event_id = event_data.get('image_id') or event_data.get('comment_id') or event_data.get('flag_id', 'N/A')
-            logger.info(f"✓ Kafka: Published {event_type} event to {topic} | ID: {event_id[:8] if isinstance(event_id, str) else event_id} | Total: {self.event_count}")
+            logger.info(f"Kafka: Published {event_type} event to {topic} | ID: {event_id[:8] if isinstance(event_id, str) else event_id} | Total: {self.event_count}")
 
             return True
 
         except KafkaError as e:
-            logger.error(f"✗ Kafka error publishing {event_data.get('event_type', 'unknown')} to {topic}: {e}")
+            logger.error(f"Kafka error publishing {event_data.get('event_type', 'unknown')} to {topic}: {e}")
             return False
 
         except Exception as e:
-            logger.error(f"✗ Unexpected error publishing {event_data.get('event_type', 'unknown')} to {topic}: {e}")
+            logger.error(f"Unexpected error publishing {event_data.get('event_type', 'unknown')} to {topic}: {e}")
             return False
 
 
