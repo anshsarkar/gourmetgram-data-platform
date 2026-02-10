@@ -1,0 +1,8 @@
+apache-airflow-providers-postgres
+apache-airflow-providers-amazon
+pyiceberg[s3fs,sql-postgres]
+pandas
+sqlalchemy<2.0
+psycopg2-binary
+pyarrow
+apache-airflow==2.10.5

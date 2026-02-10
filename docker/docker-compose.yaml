@@ -121,8 +121,9 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ./init_sql:/docker-entrypoint-initdb.d
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U user -d gourmetgram"]
+      test: [ "CMD-SHELL", "pg_isready -U user -d gourmetgram" ]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -159,12 +160,12 @@ services:
       - --memory 1G
       - --mode dev-container
     ports:
-      - "18081:18081"  # Schema Registry
-      - "18082:18082"  # Pandaproxy
-      - "19092:19092"  # Kafka API
-      - "19644:9644"   # Admin API
+      - "18081:18081" # Schema Registry
+      - "18082:18082" # Pandaproxy
+      - "19092:19092" # Kafka API
+      - "19644:9644" # Admin API
     healthcheck:
-      test: ["CMD-SHELL", "rpk cluster health | grep -E 'Healthy:.+true' || exit 1"]
+      test: [ "CMD-SHELL", "rpk cluster health | grep -E 'Healthy:.+true' || exit 1" ]
       interval: 15s
       timeout: 3s
       retries: 5
@@ -178,7 +179,7 @@ services:
     volumes:
       - redis_data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: [ "CMD", "redis-cli", "ping" ]
       interval: 5s
       timeout: 3s
       retries: 5
@@ -213,7 +214,7 @@ services:
     volumes:
       - ../fastapi_service/app:/code/app
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      test: [ "CMD", "curl", "-f", "http://localhost:8000/health" ]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -267,6 +268,90 @@ services:
       postgres:
         condition: service_healthy
     restart: unless-stopped
+
+  # Airflow Services
+  airflow-init:
+    build:
+      context: ../batch-etl-airflow
+      dockerfile: Dockerfile
+    container_name: airflow_init
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://user:password@postgres:5432/airflow
+      - AIRFLOW__CORE__FERNET_KEY=46BKJoQYlPPOexq0OhDZnIlNepKFf87WFwLbfzqDDho=
+      - AIRFLOW__CORE__LOAD_EXAMPLES=False
+    entrypoint: /bin/bash
+    command:
+      - -c
+      - |
+        airflow db init
+        airflow users create --username admin --password admin --firstname Admin --lastname User --role Admin --email admin@example.com || true
+        airflow connections add 'gourmetgram_postgres' --conn-uri 'postgresql://user:password@postgres:5432/gourmetgram' || true
+        airflow connections add 'gourmetgram_minio' --conn-type 'aws' --conn-login 'admin' --conn-password 'password' --conn-extra '{"endpoint_url": "http://minio:9000"}' || true
+
+  airflow-webserver:
+    build:
+      context: ../batch-etl-airflow
+      dockerfile: Dockerfile
+    container_name: airflow_webserver
+    restart: always
+    depends_on:
+      postgres:
+        condition: service_healthy
+      airflow-init:
+        condition: service_completed_successfully
+    environment:
+      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://user:password@postgres:5432/airflow
+      - AIRFLOW__CORE__FERNET_KEY=46BKJoQYlPPOexq0OhDZnIlNepKFf87WFwLbfzqDDho=
+      - AIRFLOW__CORE__LOAD_EXAMPLES=False
+      - AIRFLOW__WEBSERVER__EXPOSE_CONFIG=True
+      # PyIceberg Configuration
+      - PYICEBERG_CATALOG__GOURMETGRAM__TYPE=sql
+      - PYICEBERG_CATALOG__GOURMETGRAM__URI=postgresql+psycopg2://user:password@postgres:5432/gourmetgram
+      - PYICEBERG_CATALOG__GOURMETGRAM__S3__ENDPOINT=http://minio:9000
+      - PYICEBERG_CATALOG__GOURMETGRAM__S3__ACCESS_KEY_ID=admin
+      - PYICEBERG_CATALOG__GOURMETGRAM__S3__SECRET_ACCESS_KEY=password
+      - PYICEBERG_CATALOG__GOURMETGRAM__WAREHOUSE=s3://gourmetgram-datalake/warehouse
+    command: webserver
+    ports:
+      - "8080:8080"
+    volumes:
+      - ../batch-etl-airflow/dags:/opt/airflow/dags
+      - ../batch-etl-airflow/plugins:/opt/airflow/plugins
+      - ../batch-etl-airflow/logs:/opt/airflow/logs
+
+  airflow-scheduler:
+    build:
+      context: ../batch-etl-airflow
+      dockerfile: Dockerfile
+    container_name: airflow_scheduler
+    restart: always
+    depends_on:
+      postgres:
+        condition: service_healthy
+      airflow-init:
+        condition: service_completed_successfully
+    environment:
+      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://user:password@postgres:5432/airflow
+      - AIRFLOW__CORE__FERNET_KEY=46BKJoQYlPPOexq0OhDZnIlNepKFf87WFwLbfzqDDho=
+      - AIRFLOW__CORE__LOAD_EXAMPLES=False
+      # PyIceberg Configuration
+      - PYICEBERG_CATALOG__GOURMETGRAM__TYPE=sql
+      - PYICEBERG_CATALOG__GOURMETGRAM__URI=postgresql+psycopg2://user:password@postgres:5432/gourmetgram
+      - PYICEBERG_CATALOG__GOURMETGRAM__S3__ENDPOINT=http://minio:9000
+      - PYICEBERG_CATALOG__GOURMETGRAM__S3__ACCESS_KEY_ID=admin
+      - PYICEBERG_CATALOG__GOURMETGRAM__S3__SECRET_ACCESS_KEY=password
+      - PYICEBERG_CATALOG__GOURMETGRAM__WAREHOUSE=s3://gourmetgram-datalake/warehouse
+    command: scheduler
+    volumes:
+      - ../batch-etl-airflow/dags:/opt/airflow/dags
+      - ../batch-etl-airflow/plugins:/opt/airflow/plugins
+      - ../batch-etl-airflow/logs:/opt/airflow/logs
 
 volumes:
   postgres_data:
