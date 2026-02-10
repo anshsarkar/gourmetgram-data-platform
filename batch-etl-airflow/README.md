@@ -1,6 +1,6 @@
 # GourmetGram Batch ETL Pipeline
 
-This project contains the Airflow DAGs and configuration for the GourmetGram moderation training data pipeline. It extracts data from Postgres, processes it into features, and loads it into an Iceberg table backed by MinIO.
+Airflow DAGs and configuration for the GourmetGram moderation training data pipeline. It extracts data from Postgres, processes it into features, and loads it into an Iceberg table backed by MinIO.
 
 ## Pipeline Overview
 
