@@ -159,6 +159,8 @@ services:
       - --smp 1
       - --memory 1G
       - --mode dev-container
+      - --set redpanda.log_retention_ms=2592000000  # 30 days retention
+      - --set redpanda.log_segment_ms=3600000       # 1-hour segments
     ports:
       - "18081:18081" # Schema Registry
       - "18082:18082" # Pandaproxy
