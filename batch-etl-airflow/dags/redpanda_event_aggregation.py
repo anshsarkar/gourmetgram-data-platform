@@ -150,8 +150,8 @@ def write_to_iceberg_task(table_name, records, config):
     import logging
     import pandas as pd
     import pyarrow as pa
-    # Import SqlCatalog directly to avoid 'load_catalog' lookup errors
-    from pyiceberg.catalog.sql import SqlCatalog
+    # Use the public API, which is stable across versions
+    from pyiceberg.catalog import load_catalog
 
     logging.info(f"=== Writing {table_name} to Iceberg ===")
 
@@ -161,17 +161,31 @@ def write_to_iceberg_task(table_name, records, config):
 
     logging.info(f"Received {len(records)} records.")
 
+    # 1. Prepare DataFrame
     df = pd.DataFrame(records)
-    # Ensure columns exist before converting
+    # Convert timestamps if columns exist
     for col in ['window_start', 'window_end', 'processed_at']:
         if col in df.columns:
             df[col] = pd.to_datetime(df[col], utc=True)
     
     pa_table = pa.Table.from_pandas(df)
 
-    # Initialize Catalog Explicitly
-    # This bypasses the environment variable lookup that was failing
-    catalog = SqlCatalog("gourmetgram", **config)
+    # 2. Configure Catalog Explicitly
+    # We construct the properties dict expected by PyIceberg
+    catalog_properties = {
+        "type": "sql",
+        "uri": config["uri"],
+        "warehouse": config["warehouse"],
+        "s3.endpoint": config["s3.endpoint"],
+        "s3.access-key-id": config["s3.access-key-id"],
+        "s3.secret-access-key": config["s3.secret-access-key"],
+    }
+
+    logging.info("Loading catalog with explicit config...")
+    
+    # 3. Load Catalog
+    # This works now because system_site_packages=False ensures we use PyIceberg 0.8.0
+    catalog = load_catalog("gourmetgram", **catalog_properties)
     
     namespace = "event_aggregations"
     identifier = f"{namespace}.{table_name}"
@@ -205,18 +219,24 @@ t1_consume = PythonOperator(
 )
 
 # Requirements: Added psycopg2-binary which is needed for SQL catalog
-iceberg_reqs = ['pyiceberg[s3fs,sql-postgres]==0.8.0', 'pandas', 'pyarrow', 'psycopg2-binary']
+iceberg_reqs = [
+    'pyiceberg[s3fs,sql-postgres]==0.8.0', 
+    'pandas', 
+    'pyarrow', 
+    'psycopg2-binary',
+    'sqlalchemy>=2.0.0' 
+]
 
 t2_write_views = PythonVirtualenvOperator(
     task_id='write_view_windows',
     python_callable=write_to_iceberg_task,
     requirements=iceberg_reqs,
-    # FIXED: Set to False to prevent using the old system-installed pyiceberg
+    # CRITICAL: Must be False to prevent Airflow's old libraries from interfering
     system_site_packages=False, 
     op_kwargs={
         'table_name': 'view_windows_5min',
         'records': "{{ ti.xcom_pull(task_ids='consume_and_aggregate_events', key='view_windows') }}",
-        'config': iceberg_config, # Pass config explicitly
+        'config': iceberg_config,
     },
     dag=dag,
 )
