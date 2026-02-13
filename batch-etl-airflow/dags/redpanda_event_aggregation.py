@@ -1,7 +1,6 @@
 from datetime import datetime, timedelta
 from airflow import DAG
-from airflow.operators.python import PythonOperator
-from airflow.operators.python import PythonVirtualenvOperator
+from airflow.operators.python import PythonOperator, PythonVirtualenvOperator
 import logging
 
 # DAG default arguments
@@ -19,19 +18,19 @@ dag = DAG(
     'redpanda_event_aggregation',
     default_args=default_args,
     description='Aggregate Redpanda events into 5-minute windows for training',
-    schedule_interval=timedelta(hours=1),  # Run every hour
+    schedule_interval=timedelta(hours=1),
     start_date=datetime(2023, 1, 1),
     catchup=False,
     tags=['etl', 'redpanda', 'iceberg', 'windowing'],
+    # CRITICAL FIX: This allows XComs to be passed as real lists, not strings
+    render_template_as_native_obj=True
 )
-
 
 def consume_and_aggregate_events(**kwargs):
     import json
-    from kafka import KafkaConsumer, TopicPartition
+    from kafka import KafkaConsumer
     from collections import defaultdict
-    from datetime import datetime, timezone
-    import pandas as pd
+    from datetime import datetime, timezone, timedelta
 
     logging.info("=== Starting Redpanda Event Aggregation ===")
 
@@ -45,142 +44,89 @@ def consume_and_aggregate_events(**kwargs):
     bootstrap_servers = 'redpanda:9092'
     topics = ['gourmetgram.views', 'gourmetgram.comments', 'gourmetgram.flags']
 
-    logging.info(f"Connecting to Redpanda at {bootstrap_servers}")
-    logging.info(f"Subscribing to topics: {topics}")
-
     consumer = KafkaConsumer(
         *topics,
         bootstrap_servers=bootstrap_servers,
         auto_offset_reset='earliest',
-        enable_auto_commit=False,  # Manual commit after successful processing
-        consumer_timeout_ms=30000,  # 30 second timeout for polling
+        enable_auto_commit=False,
+        consumer_timeout_ms=30000,
         value_deserializer=lambda m: json.loads(m.decode('utf-8')),
         group_id='airflow_event_aggregator'
     )
 
-    # Get all partitions and seek to timestamp
+    # Get partitions and seek
     partitions = consumer.assignment()
     if not partitions:
-        # Assignment happens lazily, trigger with poll
         consumer.poll(timeout_ms=1000)
         partitions = consumer.assignment()
 
-    logging.info(f"Assigned partitions: {partitions}")
-
-    # Seek to start timestamp
     start_timestamp_ms = int(start_time.timestamp() * 1000)
-    offset_dict = consumer.offsets_for_times(
-        {tp: start_timestamp_ms for tp in partitions}
-    )
+    offset_dict = consumer.offsets_for_times({tp: start_timestamp_ms for tp in partitions})
 
     for tp, offset_and_timestamp in offset_dict.items():
         if offset_and_timestamp:
-            logging.info(f"Seeking {tp} to offset {offset_and_timestamp.offset}")
             consumer.seek(tp, offset_and_timestamp.offset)
-        else:
-            logging.warning(f"No offset found for {tp} at timestamp {start_time}")
 
-    # Aggregation buckets: {image_id: {bucket_start: count}}
+    # Aggregation buckets
     view_windows = defaultdict(lambda: defaultdict(int))
     comment_windows = defaultdict(lambda: defaultdict(int))
     flag_windows = defaultdict(lambda: defaultdict(int))
 
-    # Event counters
-    events_read = 0
-    events_in_range = 0
-    events_skipped = 0
-
-    logging.info("Starting to consume events...")
-
     for message in consumer:
-        events_read += 1
-
         try:
             event = message.value
             topic = message.topic
-
-            # Parse timestamp from event
+            
             if topic == 'gourmetgram.views':
-                timestamp_str = event.get('viewed_at')
-                image_id = event.get('image_id')
+                ts_str = event.get('viewed_at')
+                img_id = event.get('image_id')
             elif topic == 'gourmetgram.comments':
-                timestamp_str = event.get('created_at')
-                image_id = event.get('image_id')
+                ts_str = event.get('created_at')
+                img_id = event.get('image_id')
             elif topic == 'gourmetgram.flags':
-                timestamp_str = event.get('created_at')
-                image_id = event.get('image_id')
-                # Skip comment flags (no image_id)
-                if not image_id:
-                    events_skipped += 1
-                    continue
+                ts_str = event.get('created_at')
+                img_id = event.get('image_id')
+                if not img_id: continue
             else:
-                events_skipped += 1
                 continue
 
             # Parse timestamp
-            if isinstance(timestamp_str, str):
-                # Handle ISO format with or without timezone
-                if timestamp_str.endswith('Z'):
-                    timestamp = datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
-                elif '+' in timestamp_str or timestamp_str.endswith('00:00'):
-                    timestamp = datetime.fromisoformat(timestamp_str)
+            if isinstance(ts_str, str):
+                if ts_str.endswith('Z'):
+                    timestamp = datetime.fromisoformat(ts_str.replace('Z', '+00:00'))
                 else:
-                    timestamp = datetime.fromisoformat(timestamp_str).replace(tzinfo=timezone.utc)
+                    timestamp = datetime.fromisoformat(ts_str)
+                    if timestamp.tzinfo is None:
+                        timestamp = timestamp.replace(tzinfo=timezone.utc)
             else:
-                # Assume it's already a datetime
-                timestamp = timestamp_str
-                if timestamp.tzinfo is None:
-                    timestamp = timestamp.replace(tzinfo=timezone.utc)
+                timestamp = ts_str
 
-            # Skip events outside our time range
-            if timestamp < start_time:
-                continue  # Haven't reached start yet
-            if timestamp >= end_time:
-                # We've passed the end time, stop consuming
-                break
+            if timestamp < start_time: continue
+            if timestamp >= end_time: break
 
-            events_in_range += 1
+            # Bucket (5 mins)
+            bucket_start = timestamp.replace(minute=(timestamp.minute // 5) * 5, second=0, microsecond=0)
 
-            # Calculate 5-minute bucket
-            # Floor to nearest 5-minute interval
-            bucket_start = timestamp.replace(
-                minute=(timestamp.minute // 5) * 5,
-                second=0,
-                microsecond=0
-            )
-
-            # Increment count for this (image_id, bucket) pair
             if topic == 'gourmetgram.views':
-                view_windows[str(image_id)][bucket_start] += 1
+                view_windows[str(img_id)][bucket_start] += 1
             elif topic == 'gourmetgram.comments':
-                comment_windows[str(image_id)][bucket_start] += 1
+                comment_windows[str(img_id)][bucket_start] += 1
             elif topic == 'gourmetgram.flags':
-                flag_windows[str(image_id)][bucket_start] += 1
+                flag_windows[str(img_id)][bucket_start] += 1
 
         except Exception as e:
-            logging.error(f"Error processing event: {e}")
-            logging.error(f"Event: {event}")
-            events_skipped += 1
+            logging.error(f"Error: {e}")
             continue
 
     consumer.close()
 
-    logging.info(f"=== Consumption Complete ===")
-    logging.info(f"Events read: {events_read}")
-    logging.info(f"Events in time range: {events_in_range}")
-    logging.info(f"Events skipped: {events_skipped}")
-    logging.info(f"View windows: {sum(len(buckets) for buckets in view_windows.values())}")
-    logging.info(f"Comment windows: {sum(len(buckets) for buckets in comment_windows.values())}")
-    logging.info(f"Flag windows: {sum(len(buckets) for buckets in flag_windows.values())}")
-
-    # Convert to DataFrame format for downstream tasks
+    # Helper to format records
     def to_records(windows_dict):
-        """Convert nested dict to list of records for DataFrame"""
         rows = []
-        for image_id, buckets in windows_dict.items():
+        for img_id, buckets in windows_dict.items():
             for bucket_start, count in buckets.items():
                 rows.append({
-                    'image_id': image_id,
+                    'image_id': img_id,
                     'window_start': bucket_start.isoformat(),
                     'window_end': (bucket_start + timedelta(minutes=5)).isoformat(),
                     'event_count': count,
@@ -188,44 +134,39 @@ def consume_and_aggregate_events(**kwargs):
                 })
         return rows
 
-    view_records = to_records(view_windows)
-    comment_records = to_records(comment_windows)
-    flag_records = to_records(flag_windows)
-
-    logging.info(f"Pushing {len(view_records)} view records to XCom")
-    logging.info(f"Pushing {len(comment_records)} comment records to XCom")
-    logging.info(f"Pushing {len(flag_records)} flag records to XCom")
-
-    # Push to XCom for downstream tasks
+    # Push to XCom using the Context (ti) which IS allowed in standard PythonOperator
     ti = kwargs['ti']
-    ti.xcom_push(key='view_windows', value=view_records)
-    ti.xcom_push(key='comment_windows', value=comment_records)
-    ti.xcom_push(key='flag_windows', value=flag_records)
+    ti.xcom_push(key='view_windows', value=to_records(view_windows))
+    ti.xcom_push(key='comment_windows', value=to_records(comment_windows))
+    ti.xcom_push(key='flag_windows', value=to_records(flag_windows))
 
 
-def write_view_windows_to_iceberg(**kwargs):
-    """Task 2: Write view window aggregations to Iceberg"""
+# REFACTORED: Single reusable function that takes DATA as arguments
+# No 'kwargs' or 'ti' here!
+def write_to_iceberg_task(table_name, records):
     import logging
-    from pyiceberg.catalog import load_catalog
     import pandas as pd
     import pyarrow as pa
+    from pyiceberg.catalog import load_catalog
 
-    xcom_key = 'view_windows'
-    table_name = 'view_windows_5min'
     logging.info(f"=== Writing {table_name} to Iceberg ===")
 
-    ti = kwargs['ti']
-    records = ti.xcom_pull(key=xcom_key, task_ids='consume_and_aggregate_events')
     if not records:
-        logging.info(f"No {xcom_key} data to write")
+        logging.info("No records to write.")
         return
 
+    logging.info(f"Received {len(records)} records.")
+
+    # Convert to DataFrame
     df = pd.DataFrame(records)
     df['window_start'] = pd.to_datetime(df['window_start'], utc=True)
     df['window_end'] = pd.to_datetime(df['window_end'], utc=True)
     df['processed_at'] = pd.to_datetime(df['processed_at'], utc=True)
+    
+    # Convert to PyArrow
     pa_table = pa.Table.from_pandas(df)
 
+    # Load Catalog
     catalog = load_catalog("gourmetgram")
     namespace = "event_aggregations"
     identifier = f"{namespace}.{table_name}"
@@ -238,7 +179,9 @@ def write_view_windows_to_iceberg(**kwargs):
     try:
         table = catalog.load_table(identifier)
         table.append(pa_table)
+        logging.info(f"Appended to {identifier}")
     except Exception:
+        logging.info(f"Creating new table {identifier}")
         schema = pa.schema([
             pa.field('image_id', pa.string()),
             pa.field('window_start', pa.timestamp('us', tz='UTC')),
@@ -249,138 +192,51 @@ def write_view_windows_to_iceberg(**kwargs):
         table = catalog.create_table(identifier, schema=schema)
         table.append(pa_table)
 
-    logging.info(f"Wrote {len(df)} rows to {identifier}")
-
-
-def write_comment_windows_to_iceberg(**kwargs):
-    """Task 3: Write comment window aggregations to Iceberg"""
-    import logging
-    from pyiceberg.catalog import load_catalog
-    import pandas as pd
-    import pyarrow as pa
-
-    xcom_key = 'comment_windows'
-    table_name = 'comment_windows_5min'
-    logging.info(f"=== Writing {table_name} to Iceberg ===")
-
-    ti = kwargs['ti']
-    records = ti.xcom_pull(key=xcom_key, task_ids='consume_and_aggregate_events')
-    if not records:
-        logging.info(f"No {xcom_key} data to write")
-        return
-
-    df = pd.DataFrame(records)
-    df['window_start'] = pd.to_datetime(df['window_start'], utc=True)
-    df['window_end'] = pd.to_datetime(df['window_end'], utc=True)
-    df['processed_at'] = pd.to_datetime(df['processed_at'], utc=True)
-    pa_table = pa.Table.from_pandas(df)
-
-    catalog = load_catalog("gourmetgram")
-    namespace = "event_aggregations"
-    identifier = f"{namespace}.{table_name}"
-
-    try:
-        catalog.create_namespace(namespace)
-    except Exception:
-        pass
-
-    try:
-        table = catalog.load_table(identifier)
-        table.append(pa_table)
-    except Exception:
-        schema = pa.schema([
-            pa.field('image_id', pa.string()),
-            pa.field('window_start', pa.timestamp('us', tz='UTC')),
-            pa.field('window_end', pa.timestamp('us', tz='UTC')),
-            pa.field('event_count', pa.int64()),
-            pa.field('processed_at', pa.timestamp('us', tz='UTC'))
-        ])
-        table = catalog.create_table(identifier, schema=schema)
-        table.append(pa_table)
-
-    logging.info(f"Wrote {len(df)} rows to {identifier}")
-
-
-def write_flag_windows_to_iceberg(**kwargs):
-    """Task 4: Write flag window aggregations to Iceberg"""
-    import logging
-    from pyiceberg.catalog import load_catalog
-    import pandas as pd
-    import pyarrow as pa
-
-    xcom_key = 'flag_windows'
-    table_name = 'flag_windows_5min'
-    logging.info(f"=== Writing {table_name} to Iceberg ===")
-
-    ti = kwargs['ti']
-    records = ti.xcom_pull(key=xcom_key, task_ids='consume_and_aggregate_events')
-    if not records:
-        logging.info(f"No {xcom_key} data to write")
-        return
-
-    df = pd.DataFrame(records)
-    df['window_start'] = pd.to_datetime(df['window_start'], utc=True)
-    df['window_end'] = pd.to_datetime(df['window_end'], utc=True)
-    df['processed_at'] = pd.to_datetime(df['processed_at'], utc=True)
-    pa_table = pa.Table.from_pandas(df)
-
-    catalog = load_catalog("gourmetgram")
-    namespace = "event_aggregations"
-    identifier = f"{namespace}.{table_name}"
-
-    try:
-        catalog.create_namespace(namespace)
-    except Exception:
-        pass
-
-    try:
-        table = catalog.load_table(identifier)
-        table.append(pa_table)
-    except Exception:
-        schema = pa.schema([
-            pa.field('image_id', pa.string()),
-            pa.field('window_start', pa.timestamp('us', tz='UTC')),
-            pa.field('window_end', pa.timestamp('us', tz='UTC')),
-            pa.field('event_count', pa.int64()),
-            pa.field('processed_at', pa.timestamp('us', tz='UTC'))
-        ])
-        table = catalog.create_table(identifier, schema=schema)
-        table.append(pa_table)
-
-    logging.info(f"Wrote {len(df)} rows to {identifier}")
-
-
-# Define tasks
+# Define Tasks
 t1_consume = PythonOperator(
     task_id='consume_and_aggregate_events',
     python_callable=consume_and_aggregate_events,
     dag=dag,
 )
 
+# Common requirements for virtualenv tasks
+iceberg_reqs = ['pyiceberg[s3fs,sql-postgres]==0.8.0', 'pandas', 'pyarrow']
+
 t2_write_views = PythonVirtualenvOperator(
     task_id='write_view_windows',
-    python_callable=write_view_windows_to_iceberg,
-    requirements=['pyiceberg[s3fs,sql-postgres]==0.8.0', 'pandas', 'pyarrow'],
+    python_callable=write_to_iceberg_task,
+    requirements=iceberg_reqs,
     system_site_packages=True,
+    op_kwargs={
+        'table_name': 'view_windows_5min',
+        # Jinja Template to fetch XCom data BEFORE the task starts
+        'records': "{{ ti.xcom_pull(task_ids='consume_and_aggregate_events', key='view_windows') }}"
+    },
     dag=dag,
 )
 
 t3_write_comments = PythonVirtualenvOperator(
     task_id='write_comment_windows',
-    python_callable=write_comment_windows_to_iceberg,
-    requirements=['pyiceberg[s3fs,sql-postgres]==0.8.0', 'pandas', 'pyarrow'],
+    python_callable=write_to_iceberg_task,
+    requirements=iceberg_reqs,
     system_site_packages=True,
+    op_kwargs={
+        'table_name': 'comment_windows_5min',
+        'records': "{{ ti.xcom_pull(task_ids='consume_and_aggregate_events', key='comment_windows') }}"
+    },
     dag=dag,
 )
 
 t4_write_flags = PythonVirtualenvOperator(
     task_id='write_flag_windows',
-    python_callable=write_flag_windows_to_iceberg,
-    requirements=['pyiceberg[s3fs,sql-postgres]==0.8.0', 'pandas', 'pyarrow'],
+    python_callable=write_to_iceberg_task,
+    requirements=iceberg_reqs,
     system_site_packages=True,
+    op_kwargs={
+        'table_name': 'flag_windows_5min',
+        'records': "{{ ti.xcom_pull(task_ids='consume_and_aggregate_events', key='flag_windows') }}"
+    },
     dag=dag,
 )
 
-# Define dependencies
-# Consume events first, then write to Iceberg in parallel
 t1_consume >> [t2_write_views, t3_write_comments, t4_write_flags]
