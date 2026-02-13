@@ -4,7 +4,7 @@ services:
 
   # ETL: Extract - Download Food-11 dataset
   extract-data:
-    container_name: etl_extract_data
+    container_name: extract
     image: python:3.11
     user: root
     volumes:
@@ -46,7 +46,7 @@ services:
 
   # ETL: Transform - Organize into class folders
   transform-data:
-    container_name: etl_transform_data
+    container_name: transform
     image: python:3.11
     volumes:
       - food11:/data
@@ -112,7 +112,7 @@ services:
   # PostgreSQL Database
   postgres:
     image: postgres:15
-    container_name: gourmetgram_db
+    container_name: postgres
     environment:
       POSTGRES_USER: user
       POSTGRES_PASSWORD: password
@@ -131,7 +131,7 @@ services:
   # MinIO Object Storage
   minio:
     image: minio/minio
-    container_name: gourmetgram_minio
+    container_name: minio
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: admin
@@ -150,7 +150,7 @@ services:
   # Create required MinIO buckets
   minio-init:
     image: minio/mc
-    container_name: gourmetgram_minio_init
+    container_name: minio-init
     depends_on:
       minio:
         condition: service_healthy
@@ -166,7 +166,7 @@ services:
   # RedPanda (Kafka-compatible message broker)
   redpanda:
     image: docker.redpanda.com/redpandadata/redpanda:v23.3.3
-    container_name: gourmetgram_redpanda
+    container_name: redpanda
     command:
       - redpanda
       - start
@@ -196,7 +196,7 @@ services:
   # Redis (Real-time feature store)
   redis:
     image: redis:7-alpine
-    container_name: gourmetgram_redis
+    container_name: redis
     ports:
       - "6379:6379"
     volumes:
@@ -213,7 +213,7 @@ services:
     build:
       context: ../fastapi_service
       dockerfile: Dockerfile
-    container_name: gourmetgram_api
+    container_name: api
     ports:
       - "8000:8000"
     environment:
@@ -248,7 +248,7 @@ services:
     build:
       context: ../data_generator
       dockerfile: Dockerfile
-    container_name: gourmetgram_generator
+    container_name: generator
     environment:
       - GENERATOR_API_URL=http://api:8000
       - GENERATOR_DATASET_PATH=/data/Food-11
@@ -270,7 +270,7 @@ services:
     build:
       context: ../stream_consumer
       dockerfile: Dockerfile
-    container_name: gourmetgram_stream_consumer
+    container_name: stream-consumer
     environment:
       - KAFKA_BOOTSTRAP_SERVERS=redpanda:9092
       - KAFKA_CONSUMER_GROUP=gourmetgram-stream-consumer
@@ -298,7 +298,7 @@ services:
       context: ../batch-etl-airflow
       dockerfile: Dockerfile
     user: root
-    container_name: airflow_init
+    container_name: airflow-init
     depends_on:
       postgres:
         condition: service_healthy
@@ -322,7 +322,7 @@ services:
       context: ../batch-etl-airflow
       dockerfile: Dockerfile
     user: root
-    container_name: airflow_webserver
+    container_name: airflow-webserver
     restart: always
     depends_on:
       postgres:
@@ -356,7 +356,7 @@ services:
       context: ../batch-etl-airflow
       dockerfile: Dockerfile
     user: root
-    container_name: airflow_scheduler
+    container_name: airflow-scheduler
     restart: always
     depends_on:
       postgres:
