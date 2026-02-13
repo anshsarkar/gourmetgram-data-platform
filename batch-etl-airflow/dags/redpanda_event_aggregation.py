@@ -17,7 +17,7 @@ default_args = {
 
 # Create DAG
 dag = DAG(
-    'redpanda_event_aggregation',
+    'redpanda_event_aggregation_v2',
     default_args=default_args,
     description='Aggregate Redpanda events into 5-minute windows for training',
     schedule_interval=timedelta(hours=1),  # Run every hour
