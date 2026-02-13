@@ -14,9 +14,6 @@ class UserResponse(BaseModel):
     class Config:
         from_attributes = True
 
-# --- Images ---
-# Note: Uploads use Form data, so we don't strictly need a Pydantic model for the input body,
-# but we need one for the response.
 class ImageResponse(BaseModel):
     id: UUID
     user_id: UUID

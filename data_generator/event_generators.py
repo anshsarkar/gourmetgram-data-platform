@@ -215,7 +215,7 @@ class GourmetGramEventGenerators:
 
         try:
             if can_flag_image and can_flag_comment:
-                flag_target = random.choices(['image', 'comment'], weights=[0.7, 0.3])[0]
+                flag_target = random.choices(['image', 'comment'], weights=[0.5, 0.5])[0]
             elif can_flag_image:
                 flag_target = 'image'
             else:
