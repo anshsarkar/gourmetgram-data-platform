@@ -169,17 +169,6 @@ def transform_features(**kwargs):
                     (comment_windows_df['window_end'] <= cutoff_time)
                 ]
 
-                img_flags_windows = flag_windows_df[
-                    (flag_windows_df['image_id'] == image_id) &
-                    (flag_windows_df['window_start'] >= upload_time) &
-                    (flag_windows_df['window_end'] <= cutoff_time)
-                ]
-
-                # Total counts = sum of all windows
-                total_views = int(img_views['event_count'].sum()) if not img_views.empty else 0
-                total_comments = int(img_comments_windows['event_count'].sum()) if not img_comments_windows.empty else 0
-                total_flags = int(img_flags_windows['event_count'].sum()) if not img_flags_windows.empty else 0
-
                 # Rolling window features (no 1-min due to 5-min granularity limitation)
                 # Last 5 minutes
                 last_5min = cutoff_time - pd.Timedelta(minutes=5)
@@ -200,13 +189,9 @@ def transform_features(**kwargs):
             else:
                 # Fallback to milestone approximation (Should remove this part later)
                 img_comments_raw = comments[comments['image_id'] == image_id]
-                total_comments = len(img_comments_raw[
+                comments_1hr = len(img_comments_raw[
                     (img_comments_raw['created_at'] >= upload_time) &
                     (img_comments_raw['created_at'] <= cutoff_time)
-                ])
-                total_flags = len(img_flags[
-                    (img_flags['created_at'] >= upload_time) &
-                    (img_flags['created_at'] <= cutoff_time)
                 ])
 
                 img_milestones = milestones[
@@ -214,17 +199,15 @@ def transform_features(**kwargs):
                     (milestones['milestone_type'] == 'views') &
                     (milestones['reached_at'] <= cutoff_time)
                 ]
-                total_views = int(img_milestones['milestone_value'].max()) if not img_milestones.empty else 0
+                views_1hr = int(img_milestones['milestone_value'].max()) if not img_milestones.empty else 0
 
                 # Approximate rolling windows (less accurate, no 1-min due to granularity)
-                views_5min = int(total_views / max(minutes / 5, 1)) if minutes >= 5 else total_views
-                views_1hr = total_views
-                comments_5min = int(total_comments / max(minutes / 5, 1)) if minutes >= 5 else total_comments
-                comments_1hr = total_comments
+                views_5min = int(views_1hr / max(minutes / 5, 1)) if minutes >= 5 else views_1hr
+                comments_5min = int(comments_1hr / max(minutes / 5, 1)) if minutes >= 5 else comments_1hr
 
             # Derived features (matching inference, without 1-min features)
             view_velocity_per_min = float(views_5min / 5.0) if views_5min > 0 else 0.0
-            comment_to_view_ratio = float(total_comments / max(total_views, 1))
+            comment_to_view_ratio = float(comments_1hr / max(views_1hr, 1))
             # Engagement score using 5-min windows (weight comments 5x)
             recent_engagement_score = float(views_5min + (comments_5min * 5))
 
@@ -239,7 +222,7 @@ def transform_features(**kwargs):
                 (images['uploaded_at'] <= cutoff_time)
             ])
             user_created = img.get('user_created_at', upload_time)
-            user_age_days = int((pd.Timestamp.utcnow() - user_created).total_seconds() / 86400) if pd.notna(user_created) else 0
+            user_age_days = int((upload_time - user_created).total_seconds() / 86400) if pd.notna(user_created) else 0
 
             # Temporal features
             time_since_upload_seconds = minutes * 60
@@ -252,7 +235,7 @@ def transform_features(**kwargs):
             if pd.isna(category):
                 category = 'Unknown'
 
-            # Build feature row with ALL 31 features (matching inference)
+            # Build feature row (26 features matching inference)
             features_list.append({
                 'image_id': image_id,
                 'decision_point_minutes': minutes,
@@ -262,11 +245,6 @@ def transform_features(**kwargs):
                 'hour_of_day': hour_of_day,
                 'day_of_week': day_of_week,
                 'is_weekend': is_weekend,
-
-                # Totals (3)
-                'total_views': total_views,
-                'total_comments': total_comments,
-                'total_flags': total_flags,
 
                 # Window Aggregates (4 - no 1-min due to 5-min granularity)
                 'views_5min': views_5min,

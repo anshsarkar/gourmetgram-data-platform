@@ -53,11 +53,6 @@ class FeatureFetcher:
                 image_id, current_timestamp, config.window_sizes['1hr'], 'comments'
             )
 
-            # Get totals (persistent counters)
-            features['total_views'] = int(self.redis_client.get(f"image:{image_id}:total_views") or 0)
-            features['total_comments'] = int(self.redis_client.get(f"image:{image_id}:total_comments") or 0)
-            features['total_flags'] = int(self.redis_client.get(f"image:{image_id}:total_flags") or 0)
-
             # Get metadata (hash)
             metadata = self.redis_client.hgetall(f"image:{image_id}:metadata")
             features['redis_metadata'] = metadata  # Store for later use

@@ -45,48 +45,42 @@ class FeatureConstructor:
         else:
             features.append(0)
 
-        # === Totals (3) ===
-        # 5-7. total_views, total_comments, total_flags
-        features.append(raw_features.get('total_views', 0))
-        features.append(raw_features.get('total_comments', 0))
-        features.append(raw_features.get('total_flags', 0))
-
         # === Window Aggregates (4 - no 1-min due to 5-min granularity) ===
-        # 8-9. views_5min, views_1hr
+        # 5-6. views_5min, views_1hr
         features.append(raw_features.get('views_5min', 0))
         features.append(raw_features.get('views_1hr', 0))
 
-        # 10-11. comments_5min, comments_1hr
+        # 7-8. comments_5min, comments_1hr
         features.append(raw_features.get('comments_5min', 0))
         features.append(raw_features.get('comments_1hr', 0))
 
         # === Engagement Ratios (3) ===
-        total_views = raw_features.get('total_views', 0)
-        total_comments = raw_features.get('total_comments', 0)
         views_5min = raw_features.get('views_5min', 0)
+        views_1hr = raw_features.get('views_1hr', 0)
         comments_5min = raw_features.get('comments_5min', 0)
+        comments_1hr = raw_features.get('comments_1hr', 0)
 
-        # 12. view_velocity_per_min = views_5min / 5
+        # 9. view_velocity_per_min = views_5min / 5
         features.append(views_5min / 5.0 if views_5min > 0 else 0.0)
 
-        # 13. comment_to_view_ratio = total_comments / max(total_views, 1)
-        features.append(total_comments / max(total_views, 1))
+        # 10. comment_to_view_ratio = comments_1hr / max(views_1hr, 1)
+        features.append(comments_1hr / max(views_1hr, 1))
 
-        # 14. recent_engagement_score = views_5min + (comments_5min * 5)
+        # 11. recent_engagement_score = views_5min + (comments_5min * 5)
         features.append(views_5min + (comments_5min * 5))
 
         # === Content Features (2) ===
-        # 15. caption_length
+        # 12. caption_length
         features.append(raw_features.get('caption_length', 0))
 
-        # 16. has_caption (0 or 1)
+        # 13. has_caption (0 or 1)
         features.append(raw_features.get('has_caption', 0))
 
         # === User Features (2) ===
-        # 17. user_image_count
+        # 14. user_image_count
         features.append(raw_features.get('user_image_count', 0))
 
-        # 18. user_age_days
+        # 15. user_age_days
         features.append(raw_features.get('user_age_days', 0))
 
         # === Category One-Hot Encoding (11) ===
@@ -102,9 +96,9 @@ class FeatureConstructor:
         feature_vector = np.array(features, dtype=np.float32)
 
         # Validate
-        if len(feature_vector) != 29:
-            logger.error(f"Feature vector has {len(feature_vector)} dimensions, expected 29")
-            raise ValueError(f"Feature vector dimension mismatch: {len(feature_vector)} != 29")
+        if len(feature_vector) != 26:
+            logger.error(f"Feature vector has {len(feature_vector)} dimensions, expected 26")
+            raise ValueError(f"Feature vector dimension mismatch: {len(feature_vector)} != 26")
 
         if np.any(np.isnan(feature_vector)):
             logger.warning("Feature vector contains NaN values")

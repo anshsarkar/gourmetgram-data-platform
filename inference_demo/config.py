@@ -39,18 +39,13 @@ class Config:
             "Vegetable/Fruit"  # class_10
         ]
 
-        # Feature Names (29 total - no 1-min windows due to 5-min granularity)
+        # Feature Names (26 total - no 1-min windows, no redundant totals)
         self.feature_names = [
             # Temporal (4)
             'time_since_upload_seconds',
             'hour_of_day',
             'day_of_week',
             'is_weekend',
-
-            # Totals (3)
-            'total_views',
-            'total_comments',
-            'total_flags',
 
             # Window Aggregates (4 - no 1-min)
             'views_5min',
