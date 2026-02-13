@@ -353,7 +353,7 @@ t1_consume = PythonOperator(
 t2_write_views = PythonVirtualenvOperator(
     task_id='write_view_windows',
     python_callable=write_view_windows_to_iceberg,
-    requirements=['pyiceberg[s3fs,sql-postgres]==0.8.0', 'pandas', 'pyarrow'],
+    requirements=['pyiceberg[s3fs,sql-postgres]==0.8.0', 'pandas', 'pyarrow', 'sqlalchemy>=2.0'],
     system_site_packages=False,
     op_kwargs={
         'records': "{{ ti.xcom_pull(task_ids='consume_and_aggregate_events', key='view_windows') }}",
@@ -364,7 +364,7 @@ t2_write_views = PythonVirtualenvOperator(
 t3_write_comments = PythonVirtualenvOperator(
     task_id='write_comment_windows',
     python_callable=write_comment_windows_to_iceberg,
-    requirements=['pyiceberg[s3fs,sql-postgres]==0.8.0', 'pandas', 'pyarrow'],
+    requirements=['pyiceberg[s3fs,sql-postgres]==0.8.0', 'pandas', 'pyarrow', 'sqlalchemy>=2.0'],
     system_site_packages=False,
     op_kwargs={
         'records': "{{ ti.xcom_pull(task_ids='consume_and_aggregate_events', key='comment_windows') }}",
@@ -375,7 +375,7 @@ t3_write_comments = PythonVirtualenvOperator(
 t4_write_flags = PythonVirtualenvOperator(
     task_id='write_flag_windows',
     python_callable=write_flag_windows_to_iceberg,
-    requirements=['pyiceberg[s3fs,sql-postgres]==0.8.0', 'pandas', 'pyarrow'],
+    requirements=['pyiceberg[s3fs,sql-postgres]==0.8.0', 'pandas', 'pyarrow', 'sqlalchemy>=2.0'],
     system_site_packages=False,
     op_kwargs={
         'records': "{{ ti.xcom_pull(task_ids='consume_and_aggregate_events', key='flag_windows') }}",
