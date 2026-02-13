@@ -1,8 +1,7 @@
 from datetime import datetime, timedelta
 from airflow import DAG
 from airflow.operators.python import PythonOperator
-from airflow.operators.python import ExternalPythonOperator
-
+import os
 import logging
 
 # DAG default arguments
@@ -17,15 +16,70 @@ default_args = {
 
 # Create DAG
 dag = DAG(
-    'redpanda_event_aggregation_v2',
+    'redpanda_event_aggregation',
     default_args=default_args,
     description='Aggregate Redpanda events into 5-minute windows for training',
     schedule_interval=timedelta(hours=1),  # Run every hour
     start_date=datetime(2023, 1, 1),
     catchup=False,
     tags=['etl', 'redpanda', 'iceberg', 'windowing'],
-    render_template_as_native_obj=True,
 )
+
+# Path to isolated iceberg venv python (built in Dockerfile)
+ICEBERG_PYTHON = '/home/airflow/iceberg_venv/bin/python.real'
+
+# Inline script that runs inside the iceberg venv subprocess
+ICEBERG_WRITE_SCRIPT = '''
+import sys, json, logging
+
+logging.basicConfig(level=logging.INFO)
+
+# Read input from stdin
+input_data = json.loads(sys.stdin.read())
+table_name = input_data["table_name"]
+records = input_data["records"]
+
+logging.info(f"=== Writing {table_name} to Iceberg ===")
+
+if not records:
+    logging.info("No data to write")
+    sys.exit(0)
+
+import pandas as pd
+import pyarrow as pa
+from pyiceberg.catalog import load_catalog
+
+df = pd.DataFrame(records)
+df["window_start"] = pd.to_datetime(df["window_start"], utc=True)
+df["window_end"] = pd.to_datetime(df["window_end"], utc=True)
+df["processed_at"] = pd.to_datetime(df["processed_at"], utc=True)
+pa_table = pa.Table.from_pandas(df)
+
+catalog = load_catalog("gourmetgram")
+namespace = "event_aggregations"
+identifier = f"{namespace}.{table_name}"
+
+try:
+    catalog.create_namespace(namespace)
+except Exception:
+    pass
+
+try:
+    table = catalog.load_table(identifier)
+    table.append(pa_table)
+except Exception:
+    schema = pa.schema([
+        pa.field("image_id", pa.string()),
+        pa.field("window_start", pa.timestamp("us", tz="UTC")),
+        pa.field("window_end", pa.timestamp("us", tz="UTC")),
+        pa.field("event_count", pa.int64()),
+        pa.field("processed_at", pa.timestamp("us", tz="UTC")),
+    ])
+    table = catalog.create_table(identifier, schema=schema)
+    table.append(pa_table)
+
+logging.info(f"Wrote {len(df)} rows to {identifier}")
+'''
 
 
 def consume_and_aggregate_events(**kwargs):
@@ -205,142 +259,68 @@ def consume_and_aggregate_events(**kwargs):
     ti.xcom_push(key='flag_windows', value=flag_records)
 
 
-def write_view_windows_to_iceberg(records):
-    """Task 2: Write view window aggregations to Iceberg"""
-    import logging
-    from pyiceberg.catalog import load_catalog
-    import pandas as pd
-    import pyarrow as pa
+def _run_iceberg_write(table_name, records):
+    """Run the Iceberg write in an isolated subprocess using the iceberg venv."""
+    import json
+    import subprocess
 
-    table_name = 'view_windows_5min'
-    logging.info(f"=== Writing {table_name} to Iceberg ===")
+    logging.info(f"Writing {table_name}: {len(records) if records else 0} records")
 
     if not records:
-        logging.info(f"No data to write")
+        logging.info(f"No {table_name} data to write")
         return
 
-    df = pd.DataFrame(records)
-    df['window_start'] = pd.to_datetime(df['window_start'], utc=True)
-    df['window_end'] = pd.to_datetime(df['window_end'], utc=True)
-    df['processed_at'] = pd.to_datetime(df['processed_at'], utc=True)
-    pa_table = pa.Table.from_pandas(df)
+    # Build a minimal, clean environment for the subprocess
+    subprocess_env = {
+        'HOME': os.environ.get('HOME', '/home/airflow'),
+        'PATH': '/usr/local/bin:/usr/bin:/bin',
+        'PYTHONNOUSERSITE': '1',
+    }
+    # Pass through PyIceberg catalog config env vars
+    for key, val in os.environ.items():
+        if key.startswith('PYICEBERG_CATALOG__'):
+            subprocess_env[key] = val
 
-    catalog = load_catalog("gourmetgram")
-    namespace = "event_aggregations"
-    identifier = f"{namespace}.{table_name}"
+    input_data = json.dumps({'table_name': table_name, 'records': records})
 
-    try:
-        catalog.create_namespace(namespace)
-    except Exception:
-        pass
+    result = subprocess.run(
+        [ICEBERG_PYTHON, '-I', '-c', ICEBERG_WRITE_SCRIPT],
+        input=input_data,
+        capture_output=True,
+        text=True,
+        env=subprocess_env,
+    )
 
-    try:
-        table = catalog.load_table(identifier)
-        table.append(pa_table)
-    except Exception:
-        schema = pa.schema([
-            pa.field('image_id', pa.string()),
-            pa.field('window_start', pa.timestamp('us', tz='UTC')),
-            pa.field('window_end', pa.timestamp('us', tz='UTC')),
-            pa.field('event_count', pa.int64()),
-            pa.field('processed_at', pa.timestamp('us', tz='UTC'))
-        ])
-        table = catalog.create_table(identifier, schema=schema)
-        table.append(pa_table)
+    # Log stdout/stderr from subprocess
+    if result.stdout:
+        for line in result.stdout.strip().split('\n'):
+            logging.info(f"[iceberg] {line}")
+    if result.stderr:
+        for line in result.stderr.strip().split('\n'):
+            logging.info(f"[iceberg] {line}")
 
-    logging.info(f"Wrote {len(df)} rows to {identifier}")
-
-
-def write_comment_windows_to_iceberg(records):
-    """Task 3: Write comment window aggregations to Iceberg"""
-    import logging
-    from pyiceberg.catalog import load_catalog
-    import pandas as pd
-    import pyarrow as pa
-
-    table_name = 'comment_windows_5min'
-    logging.info(f"=== Writing {table_name} to Iceberg ===")
-
-    if not records:
-        logging.info(f"No data to write")
-        return
-
-    df = pd.DataFrame(records)
-    df['window_start'] = pd.to_datetime(df['window_start'], utc=True)
-    df['window_end'] = pd.to_datetime(df['window_end'], utc=True)
-    df['processed_at'] = pd.to_datetime(df['processed_at'], utc=True)
-    pa_table = pa.Table.from_pandas(df)
-
-    catalog = load_catalog("gourmetgram")
-    namespace = "event_aggregations"
-    identifier = f"{namespace}.{table_name}"
-
-    try:
-        catalog.create_namespace(namespace)
-    except Exception:
-        pass
-
-    try:
-        table = catalog.load_table(identifier)
-        table.append(pa_table)
-    except Exception:
-        schema = pa.schema([
-            pa.field('image_id', pa.string()),
-            pa.field('window_start', pa.timestamp('us', tz='UTC')),
-            pa.field('window_end', pa.timestamp('us', tz='UTC')),
-            pa.field('event_count', pa.int64()),
-            pa.field('processed_at', pa.timestamp('us', tz='UTC'))
-        ])
-        table = catalog.create_table(identifier, schema=schema)
-        table.append(pa_table)
-
-    logging.info(f"Wrote {len(df)} rows to {identifier}")
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"Iceberg write failed for {table_name} (exit {result.returncode}):\n{result.stderr}"
+        )
 
 
-def write_flag_windows_to_iceberg(records):
-    """Task 4: Write flag window aggregations to Iceberg"""
-    import logging
-    from pyiceberg.catalog import load_catalog
-    import pandas as pd
-    import pyarrow as pa
+def write_view_windows(**kwargs):
+    ti = kwargs['ti']
+    records = ti.xcom_pull(key='view_windows', task_ids='consume_and_aggregate_events')
+    _run_iceberg_write('view_windows_5min', records)
 
-    table_name = 'flag_windows_5min'
-    logging.info(f"=== Writing {table_name} to Iceberg ===")
 
-    if not records:
-        logging.info(f"No data to write")
-        return
+def write_comment_windows(**kwargs):
+    ti = kwargs['ti']
+    records = ti.xcom_pull(key='comment_windows', task_ids='consume_and_aggregate_events')
+    _run_iceberg_write('comment_windows_5min', records)
 
-    df = pd.DataFrame(records)
-    df['window_start'] = pd.to_datetime(df['window_start'], utc=True)
-    df['window_end'] = pd.to_datetime(df['window_end'], utc=True)
-    df['processed_at'] = pd.to_datetime(df['processed_at'], utc=True)
-    pa_table = pa.Table.from_pandas(df)
 
-    catalog = load_catalog("gourmetgram")
-    namespace = "event_aggregations"
-    identifier = f"{namespace}.{table_name}"
-
-    try:
-        catalog.create_namespace(namespace)
-    except Exception:
-        pass
-
-    try:
-        table = catalog.load_table(identifier)
-        table.append(pa_table)
-    except Exception:
-        schema = pa.schema([
-            pa.field('image_id', pa.string()),
-            pa.field('window_start', pa.timestamp('us', tz='UTC')),
-            pa.field('window_end', pa.timestamp('us', tz='UTC')),
-            pa.field('event_count', pa.int64()),
-            pa.field('processed_at', pa.timestamp('us', tz='UTC'))
-        ])
-        table = catalog.create_table(identifier, schema=schema)
-        table.append(pa_table)
-
-    logging.info(f"Wrote {len(df)} rows to {identifier}")
+def write_flag_windows(**kwargs):
+    ti = kwargs['ti']
+    records = ti.xcom_pull(key='flag_windows', task_ids='consume_and_aggregate_events')
+    _run_iceberg_write('flag_windows_5min', records)
 
 
 # Define tasks
@@ -350,36 +330,21 @@ t1_consume = PythonOperator(
     dag=dag,
 )
 
-# Path to pre-built iceberg venv (created in Dockerfile)
-ICEBERG_PYTHON = '/home/airflow/iceberg_venv/bin/python'
-
-t2_write_views = ExternalPythonOperator(
+t2_write_views = PythonOperator(
     task_id='write_view_windows',
-    python_callable=write_view_windows_to_iceberg,
-    python=ICEBERG_PYTHON,
-    op_kwargs={
-        'records': "{{ ti.xcom_pull(task_ids='consume_and_aggregate_events', key='view_windows') }}",
-    },
+    python_callable=write_view_windows,
     dag=dag,
 )
 
-t3_write_comments = ExternalPythonOperator(
+t3_write_comments = PythonOperator(
     task_id='write_comment_windows',
-    python_callable=write_comment_windows_to_iceberg,
-    python=ICEBERG_PYTHON,
-    op_kwargs={
-        'records': "{{ ti.xcom_pull(task_ids='consume_and_aggregate_events', key='comment_windows') }}",
-    },
+    python_callable=write_comment_windows,
     dag=dag,
 )
 
-t4_write_flags = ExternalPythonOperator(
+t4_write_flags = PythonOperator(
     task_id='write_flag_windows',
-    python_callable=write_flag_windows_to_iceberg,
-    python=ICEBERG_PYTHON,
-    op_kwargs={
-        'records': "{{ ti.xcom_pull(task_ids='consume_and_aggregate_events', key='flag_windows') }}",
-    },
+    python_callable=write_flag_windows,
     dag=dag,
 )
 
