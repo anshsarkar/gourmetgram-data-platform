@@ -19,12 +19,14 @@ COPY requirements.txt /requirements.txt
 RUN pip install --no-cache-dir -r /requirements.txt
 
 # Create isolated venv for pyiceberg (needs sqlalchemy>=2.0, incompatible with Airflow's <2.0)
-RUN python -m venv /home/airflow/iceberg_venv \
-    && PYTHONNOUSERSITE=1 /home/airflow/iceberg_venv/bin/pip install --no-cache-dir \
+RUN python -m venv --without-pip /home/airflow/iceberg_venv \
+    && PYTHONNOUSERSITE=1 python -m pip install --no-cache-dir --prefix=/home/airflow/iceberg_venv \
        'pyiceberg[s3fs,sql-postgres]==0.8.0' \
        'sqlalchemy>=2.0' \
        'pandas' \
        'pyarrow' \
        'psycopg2-binary' \
-    && echo 'import sys; sys.path = [p for p in sys.path if "/.local/" not in p]' \
-       > /home/airflow/iceberg_venv/lib/python3.12/sitecustomize.py
+    && mv /home/airflow/iceberg_venv/bin/python /home/airflow/iceberg_venv/bin/python.real \
+    && printf '#!/bin/bash\nexport PYTHONNOUSERSITE=1\nexec /home/airflow/iceberg_venv/bin/python.real "$@"\n' \
+       > /home/airflow/iceberg_venv/bin/python \
+    && chmod +x /home/airflow/iceberg_venv/bin/python
