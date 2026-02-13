@@ -287,6 +287,7 @@ services:
       - AIRFLOW__CORE__FERNET_KEY=46BKJoQYlPPOexq0OhDZnIlNepKFf87WFwLbfzqDDho=
       - AIRFLOW__CORE__LOAD_EXAMPLES=False
       - AIRFLOW__API__AUTH_BACKENDS=airflow.api.auth.backend.basic_auth,airflow.api.auth.backend.session
+      - AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION='false'
     entrypoint: /bin/bash
     command:
       - -c
@@ -315,6 +316,7 @@ services:
       - AIRFLOW__CORE__LOAD_EXAMPLES=False
       - AIRFLOW__WEBSERVER__EXPOSE_CONFIG=True
       - AIRFLOW__API__AUTH_BACKENDS=airflow.api.auth.backend.basic_auth,airflow.api.auth.backend.session
+      - AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION='false'
       # PyIceberg Configuration
       - PYICEBERG_CATALOG__GOURMETGRAM__TYPE=sql
       - PYICEBERG_CATALOG__GOURMETGRAM__URI=postgresql+psycopg2://user:password@postgres:5432/gourmetgram
@@ -348,6 +350,7 @@ services:
       - AIRFLOW__CORE__FERNET_KEY=46BKJoQYlPPOexq0OhDZnIlNepKFf87WFwLbfzqDDho=
       - AIRFLOW__CORE__LOAD_EXAMPLES=False
       - AIRFLOW__API__AUTH_BACKENDS=airflow.api.auth.backend.basic_auth,airflow.api.auth.backend.session
+      - AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION='false'
       # PyIceberg Configuration
       - PYICEBERG_CATALOG__GOURMETGRAM__TYPE=sql
       - PYICEBERG_CATALOG__GOURMETGRAM__URI=postgresql+psycopg2://user:password@postgres:5432/gourmetgram
