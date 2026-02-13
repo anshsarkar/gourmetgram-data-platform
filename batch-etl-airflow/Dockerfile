@@ -25,4 +25,6 @@ RUN python -m venv /home/airflow/iceberg_venv \
        'sqlalchemy>=2.0' \
        'pandas' \
        'pyarrow' \
-       'psycopg2-binary'
+       'psycopg2-binary' \
+    && echo 'import sys; sys.path = [p for p in sys.path if "/.local/" not in p]' \
+       > /home/airflow/iceberg_venv/lib/python3.12/sitecustomize.py
