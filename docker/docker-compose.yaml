@@ -276,6 +276,7 @@ services:
     build:
       context: ../batch-etl-airflow
       dockerfile: Dockerfile
+    user: root
     container_name: airflow_init
     depends_on:
       postgres:
@@ -298,6 +299,7 @@ services:
     build:
       context: ../batch-etl-airflow
       dockerfile: Dockerfile
+    user: root
     container_name: airflow_webserver
     restart: always
     depends_on:
@@ -330,6 +332,7 @@ services:
     build:
       context: ../batch-etl-airflow
       dockerfile: Dockerfile
+    user: root
     container_name: airflow_scheduler
     restart: always
     depends_on:
