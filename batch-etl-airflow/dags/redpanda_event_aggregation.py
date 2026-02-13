@@ -24,6 +24,7 @@ dag = DAG(
     start_date=datetime(2023, 1, 1),
     catchup=False,
     tags=['etl', 'redpanda', 'iceberg', 'windowing'],
+    render_template_as_native_obj=True,
 )
 
 
@@ -354,7 +355,6 @@ t2_write_views = PythonVirtualenvOperator(
     python_callable=write_view_windows_to_iceberg,
     requirements=['pyiceberg[s3fs,sql-postgres]==0.8.0', 'pandas', 'pyarrow'],
     system_site_packages=False,
-    render_template_as_native_obj=True,
     op_kwargs={
         'records': "{{ ti.xcom_pull(task_ids='consume_and_aggregate_events', key='view_windows') }}",
     },
@@ -366,7 +366,6 @@ t3_write_comments = PythonVirtualenvOperator(
     python_callable=write_comment_windows_to_iceberg,
     requirements=['pyiceberg[s3fs,sql-postgres]==0.8.0', 'pandas', 'pyarrow'],
     system_site_packages=False,
-    render_template_as_native_obj=True,
     op_kwargs={
         'records': "{{ ti.xcom_pull(task_ids='consume_and_aggregate_events', key='comment_windows') }}",
     },
@@ -378,7 +377,6 @@ t4_write_flags = PythonVirtualenvOperator(
     python_callable=write_flag_windows_to_iceberg,
     requirements=['pyiceberg[s3fs,sql-postgres]==0.8.0', 'pandas', 'pyarrow'],
     system_site_packages=False,
-    render_template_as_native_obj=True,
     op_kwargs={
         'records': "{{ ti.xcom_pull(task_ids='consume_and_aggregate_events', key='flag_windows') }}",
     },
