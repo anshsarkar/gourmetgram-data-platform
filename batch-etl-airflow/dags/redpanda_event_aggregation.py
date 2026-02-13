@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta
 from airflow import DAG
 from airflow.operators.python import PythonOperator
+from airflow.operators.python import PythonVirtualenvOperator
 
 import logging
 
@@ -203,21 +204,18 @@ def consume_and_aggregate_events(**kwargs):
     ti.xcom_push(key='flag_windows', value=flag_records)
 
 
-def write_view_windows_to_iceberg(**kwargs):
+def write_view_windows_to_iceberg(records):
     """Task 2: Write view window aggregations to Iceberg"""
     import logging
     from pyiceberg.catalog import load_catalog
     import pandas as pd
     import pyarrow as pa
 
-    xcom_key = 'view_windows'
     table_name = 'view_windows_5min'
     logging.info(f"=== Writing {table_name} to Iceberg ===")
 
-    ti = kwargs['ti']
-    records = ti.xcom_pull(key=xcom_key, task_ids='consume_and_aggregate_events')
     if not records:
-        logging.info(f"No {xcom_key} data to write")
+        logging.info(f"No data to write")
         return
 
     df = pd.DataFrame(records)
@@ -252,21 +250,18 @@ def write_view_windows_to_iceberg(**kwargs):
     logging.info(f"Wrote {len(df)} rows to {identifier}")
 
 
-def write_comment_windows_to_iceberg(**kwargs):
+def write_comment_windows_to_iceberg(records):
     """Task 3: Write comment window aggregations to Iceberg"""
     import logging
     from pyiceberg.catalog import load_catalog
     import pandas as pd
     import pyarrow as pa
 
-    xcom_key = 'comment_windows'
     table_name = 'comment_windows_5min'
     logging.info(f"=== Writing {table_name} to Iceberg ===")
 
-    ti = kwargs['ti']
-    records = ti.xcom_pull(key=xcom_key, task_ids='consume_and_aggregate_events')
     if not records:
-        logging.info(f"No {xcom_key} data to write")
+        logging.info(f"No data to write")
         return
 
     df = pd.DataFrame(records)
@@ -301,21 +296,18 @@ def write_comment_windows_to_iceberg(**kwargs):
     logging.info(f"Wrote {len(df)} rows to {identifier}")
 
 
-def write_flag_windows_to_iceberg(**kwargs):
+def write_flag_windows_to_iceberg(records):
     """Task 4: Write flag window aggregations to Iceberg"""
     import logging
     from pyiceberg.catalog import load_catalog
     import pandas as pd
     import pyarrow as pa
 
-    xcom_key = 'flag_windows'
     table_name = 'flag_windows_5min'
     logging.info(f"=== Writing {table_name} to Iceberg ===")
 
-    ti = kwargs['ti']
-    records = ti.xcom_pull(key=xcom_key, task_ids='consume_and_aggregate_events')
     if not records:
-        logging.info(f"No {xcom_key} data to write")
+        logging.info(f"No data to write")
         return
 
     df = pd.DataFrame(records)
@@ -357,21 +349,39 @@ t1_consume = PythonOperator(
     dag=dag,
 )
 
-t2_write_views = PythonOperator(
+t2_write_views = PythonVirtualenvOperator(
     task_id='write_view_windows',
     python_callable=write_view_windows_to_iceberg,
+    requirements=['pyiceberg[s3fs,sql-postgres]==0.8.0', 'pandas', 'pyarrow'],
+    system_site_packages=False,
+    render_template_as_native_obj=True,
+    op_kwargs={
+        'records': "{{ ti.xcom_pull(task_ids='consume_and_aggregate_events', key='view_windows') }}",
+    },
     dag=dag,
 )
 
-t3_write_comments = PythonOperator(
+t3_write_comments = PythonVirtualenvOperator(
     task_id='write_comment_windows',
     python_callable=write_comment_windows_to_iceberg,
+    requirements=['pyiceberg[s3fs,sql-postgres]==0.8.0', 'pandas', 'pyarrow'],
+    system_site_packages=False,
+    render_template_as_native_obj=True,
+    op_kwargs={
+        'records': "{{ ti.xcom_pull(task_ids='consume_and_aggregate_events', key='comment_windows') }}",
+    },
     dag=dag,
 )
 
-t4_write_flags = PythonOperator(
+t4_write_flags = PythonVirtualenvOperator(
     task_id='write_flag_windows',
     python_callable=write_flag_windows_to_iceberg,
+    requirements=['pyiceberg[s3fs,sql-postgres]==0.8.0', 'pandas', 'pyarrow'],
+    system_site_packages=False,
+    render_template_as_native_obj=True,
+    op_kwargs={
+        'records': "{{ ti.xcom_pull(task_ids='consume_and_aggregate_events', key='flag_windows') }}",
+    },
     dag=dag,
 )
 
