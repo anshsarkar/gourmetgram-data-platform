@@ -1,0 +1,10 @@
+pandas
+numpy
+scikit-learn
+pyiceberg[s3fs,sql-postgres]
+joblib
+pyarrow
+sqlalchemy
+psycopg2-binary
+jupyter
+notebook
