@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta
 from airflow import DAG
 from airflow.operators.python import PythonOperator
-from airflow.operators.python import PythonVirtualenvOperator
+
 import logging
 
 # DAG default arguments
@@ -357,27 +357,21 @@ t1_consume = PythonOperator(
     dag=dag,
 )
 
-t2_write_views = PythonVirtualenvOperator(
+t2_write_views = PythonOperator(
     task_id='write_view_windows',
     python_callable=write_view_windows_to_iceberg,
-    requirements=['pyiceberg[s3fs,sql-postgres]==0.8.0', 'pandas', 'pyarrow'],
-    system_site_packages=True,
     dag=dag,
 )
 
-t3_write_comments = PythonVirtualenvOperator(
+t3_write_comments = PythonOperator(
     task_id='write_comment_windows',
     python_callable=write_comment_windows_to_iceberg,
-    requirements=['pyiceberg[s3fs,sql-postgres]==0.8.0', 'pandas', 'pyarrow'],
-    system_site_packages=True,
     dag=dag,
 )
 
-t4_write_flags = PythonVirtualenvOperator(
+t4_write_flags = PythonOperator(
     task_id='write_flag_windows',
     python_callable=write_flag_windows_to_iceberg,
-    requirements=['pyiceberg[s3fs,sql-postgres]==0.8.0', 'pandas', 'pyarrow'],
-    system_site_packages=True,
     dag=dag,
 )
 
