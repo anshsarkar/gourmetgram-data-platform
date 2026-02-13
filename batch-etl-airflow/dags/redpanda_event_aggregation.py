@@ -205,99 +205,40 @@ def consume_and_aggregate_events(**kwargs):
 
 def write_view_windows_to_iceberg(**kwargs):
     """Task 2: Write view window aggregations to Iceberg"""
-    _write_windows_to_iceberg(
-        xcom_key='view_windows',
-        table_name='view_windows_5min',
-        **kwargs
-    )
-
-
-def write_comment_windows_to_iceberg(**kwargs):
-    """Task 3: Write comment window aggregations to Iceberg"""
-    _write_windows_to_iceberg(
-        xcom_key='comment_windows',
-        table_name='comment_windows_5min',
-        **kwargs
-    )
-
-
-def write_flag_windows_to_iceberg(**kwargs):
-    """Task 4: Write flag window aggregations to Iceberg"""
-    _write_windows_to_iceberg(
-        xcom_key='flag_windows',
-        table_name='flag_windows_5min',
-        **kwargs
-    )
-
-
-def _write_windows_to_iceberg(xcom_key, table_name, **kwargs):
-    """
-    Helper function to write windowed aggregations to Iceberg.
-
-    Args:
-        xcom_key: XCom key to pull data from
-        table_name: Iceberg table name (without namespace)
-        **kwargs: Airflow context
-    """
+    import logging
     from pyiceberg.catalog import load_catalog
     import pandas as pd
     import pyarrow as pa
 
+    xcom_key = 'view_windows'
+    table_name = 'view_windows_5min'
     logging.info(f"=== Writing {table_name} to Iceberg ===")
 
-    # Get data from XCom
     ti = kwargs['ti']
     records = ti.xcom_pull(key=xcom_key, task_ids='consume_and_aggregate_events')
-
     if not records:
         logging.info(f"No {xcom_key} data to write")
         return
 
-    logging.info(f"Retrieved {len(records)} records from XCom")
-
-    # Convert to DataFrame
     df = pd.DataFrame(records)
-
-    # Convert timestamp columns from ISO strings back to datetime
     df['window_start'] = pd.to_datetime(df['window_start'], utc=True)
     df['window_end'] = pd.to_datetime(df['window_end'], utc=True)
     df['processed_at'] = pd.to_datetime(df['processed_at'], utc=True)
-
-    logging.info(f"DataFrame shape: {df.shape}")
-    logging.info(f"DataFrame columns: {df.columns.tolist()}")
-    logging.info(f"Sample row:\n{df.iloc[0].to_dict() if len(df) > 0 else 'No rows'}")
-
-    # Convert to PyArrow Table
     pa_table = pa.Table.from_pandas(df)
 
-    # Load Iceberg catalog
-    logging.info("Loading Iceberg catalog 'gourmetgram'")
     catalog = load_catalog("gourmetgram")
-
     namespace = "event_aggregations"
     identifier = f"{namespace}.{table_name}"
 
-    # Create namespace if needed
     try:
         catalog.create_namespace(namespace)
-        logging.info(f"Created namespace: {namespace}")
-    except Exception as e:
-        logging.info(f"Namespace {namespace} already exists or error: {e}")
+    except Exception:
+        pass
 
-    # Create or append to table
     try:
-        # Try to load existing table
         table = catalog.load_table(identifier)
-        logging.info(f"Loaded existing table: {identifier}")
-
-        # Append data
         table.append(pa_table)
-        logging.info(f"Appended {len(df)} rows to {identifier}")
-
-    except Exception as e:
-        logging.info(f"Table {identifier} doesn't exist, creating it: {e}")
-
-        # Define schema
+    except Exception:
         schema = pa.schema([
             pa.field('image_id', pa.string()),
             pa.field('window_start', pa.timestamp('us', tz='UTC')),
@@ -305,16 +246,108 @@ def _write_windows_to_iceberg(xcom_key, table_name, **kwargs):
             pa.field('event_count', pa.int64()),
             pa.field('processed_at', pa.timestamp('us', tz='UTC'))
         ])
-
-        # Create table
         table = catalog.create_table(identifier, schema=schema)
-        logging.info(f"Created new table: {identifier}")
-
-        # Append data
         table.append(pa_table)
-        logging.info(f"Appended {len(df)} rows to new table {identifier}")
 
-    logging.info(f"=== Successfully wrote {table_name} to Iceberg ===")
+    logging.info(f"Wrote {len(df)} rows to {identifier}")
+
+
+def write_comment_windows_to_iceberg(**kwargs):
+    """Task 3: Write comment window aggregations to Iceberg"""
+    import logging
+    from pyiceberg.catalog import load_catalog
+    import pandas as pd
+    import pyarrow as pa
+
+    xcom_key = 'comment_windows'
+    table_name = 'comment_windows_5min'
+    logging.info(f"=== Writing {table_name} to Iceberg ===")
+
+    ti = kwargs['ti']
+    records = ti.xcom_pull(key=xcom_key, task_ids='consume_and_aggregate_events')
+    if not records:
+        logging.info(f"No {xcom_key} data to write")
+        return
+
+    df = pd.DataFrame(records)
+    df['window_start'] = pd.to_datetime(df['window_start'], utc=True)
+    df['window_end'] = pd.to_datetime(df['window_end'], utc=True)
+    df['processed_at'] = pd.to_datetime(df['processed_at'], utc=True)
+    pa_table = pa.Table.from_pandas(df)
+
+    catalog = load_catalog("gourmetgram")
+    namespace = "event_aggregations"
+    identifier = f"{namespace}.{table_name}"
+
+    try:
+        catalog.create_namespace(namespace)
+    except Exception:
+        pass
+
+    try:
+        table = catalog.load_table(identifier)
+        table.append(pa_table)
+    except Exception:
+        schema = pa.schema([
+            pa.field('image_id', pa.string()),
+            pa.field('window_start', pa.timestamp('us', tz='UTC')),
+            pa.field('window_end', pa.timestamp('us', tz='UTC')),
+            pa.field('event_count', pa.int64()),
+            pa.field('processed_at', pa.timestamp('us', tz='UTC'))
+        ])
+        table = catalog.create_table(identifier, schema=schema)
+        table.append(pa_table)
+
+    logging.info(f"Wrote {len(df)} rows to {identifier}")
+
+
+def write_flag_windows_to_iceberg(**kwargs):
+    """Task 4: Write flag window aggregations to Iceberg"""
+    import logging
+    from pyiceberg.catalog import load_catalog
+    import pandas as pd
+    import pyarrow as pa
+
+    xcom_key = 'flag_windows'
+    table_name = 'flag_windows_5min'
+    logging.info(f"=== Writing {table_name} to Iceberg ===")
+
+    ti = kwargs['ti']
+    records = ti.xcom_pull(key=xcom_key, task_ids='consume_and_aggregate_events')
+    if not records:
+        logging.info(f"No {xcom_key} data to write")
+        return
+
+    df = pd.DataFrame(records)
+    df['window_start'] = pd.to_datetime(df['window_start'], utc=True)
+    df['window_end'] = pd.to_datetime(df['window_end'], utc=True)
+    df['processed_at'] = pd.to_datetime(df['processed_at'], utc=True)
+    pa_table = pa.Table.from_pandas(df)
+
+    catalog = load_catalog("gourmetgram")
+    namespace = "event_aggregations"
+    identifier = f"{namespace}.{table_name}"
+
+    try:
+        catalog.create_namespace(namespace)
+    except Exception:
+        pass
+
+    try:
+        table = catalog.load_table(identifier)
+        table.append(pa_table)
+    except Exception:
+        schema = pa.schema([
+            pa.field('image_id', pa.string()),
+            pa.field('window_start', pa.timestamp('us', tz='UTC')),
+            pa.field('window_end', pa.timestamp('us', tz='UTC')),
+            pa.field('event_count', pa.int64()),
+            pa.field('processed_at', pa.timestamp('us', tz='UTC'))
+        ])
+        table = catalog.create_table(identifier, schema=schema)
+        table.append(pa_table)
+
+    logging.info(f"Wrote {len(df)} rows to {identifier}")
 
 
 # Define tasks
