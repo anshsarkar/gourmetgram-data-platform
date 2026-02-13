@@ -20,7 +20,6 @@ from heuristic_predictor import HeuristicModerationPredictor
 
 
 def setup_logging(verbose: bool = False):
-    """Configure logging"""
     level = logging.DEBUG if verbose else logging.INFO
     logging.basicConfig(
         level=level,
@@ -30,11 +29,6 @@ def setup_logging(verbose: bool = False):
 
 
 def select_active_image(db_url: str) -> Optional[str]:
-    """
-    Query Postgres for an image with recent activity.
-
-    Returns image_id or None if no images found.
-    """
     try:
         conn = psycopg2.connect(db_url)
         cursor = conn.cursor()
@@ -63,15 +57,7 @@ def select_active_image(db_url: str) -> Optional[str]:
 
 
 def run_inference(image_id: str, fetcher: FeatureFetcher, constructor: FeatureConstructor, predictor: HeuristicModerationPredictor) -> Dict[str, Any]:
-    """
-    Complete inference pipeline:
-    1. Fetch features (Redis + Postgres)
-    2. Construct feature vector
-    3. Make prediction
-    4. Measure total latency
 
-    Returns dict with all results and timing.
-    """
     start_time = time.time()
 
     # Step 1: Fetch features
@@ -109,15 +95,7 @@ def run_inference(image_id: str, fetcher: FeatureFetcher, constructor: FeatureCo
 
 
 def display_results(results: Dict[str, Any], constructor: FeatureConstructor, show_features: bool = False):
-    """
-    Pretty-print inference results.
 
-    Shows:
-    - Image ID
-    - Latency breakdown
-    - Feature vector (if requested)
-    - Prediction + reasoning
-    """
     image_id = results['image_id']
     latency = results['latency']
     prediction = results['prediction']

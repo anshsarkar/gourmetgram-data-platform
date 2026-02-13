@@ -37,10 +37,7 @@ class FeatureFetcher:
         features = {}
 
         try:
-            # Get window counts for views (ZCOUNT on sorted sets)
-            features['views_1min'] = self._get_window_count(
-                image_id, current_timestamp, config.window_sizes['1min'], 'views'
-            )
+            # Get window counts for views (no 1-min due to 5-min granularity)
             features['views_5min'] = self._get_window_count(
                 image_id, current_timestamp, config.window_sizes['5min'], 'views'
             )
@@ -48,10 +45,7 @@ class FeatureFetcher:
                 image_id, current_timestamp, config.window_sizes['1hr'], 'views'
             )
 
-            # Get window counts for comments (ZCOUNT on sorted sets - FIXED)
-            features['comments_1min'] = self._get_window_count(
-                image_id, current_timestamp, config.window_sizes['1min'], 'comments'
-            )
+            # Get window counts for comments (no 1-min due to 5-min granularity)
             features['comments_5min'] = self._get_window_count(
                 image_id, current_timestamp, config.window_sizes['5min'], 'comments'
             )
@@ -166,43 +160,7 @@ class FeatureFetcher:
         return features
 
     def fetch_all_features(self, image_id: str) -> Dict[str, Any]:
-        """
-        Fetch features from both Redis and Postgres, merge, and measure total latency.
-
-        Returns:
-        {
-            # Window features (from Redis)
-            'views_1min': int,
-            'views_5min': int,
-            'views_1hr': int,
-            'comments_1min': int,
-            'comments_5min': int,
-            'comments_1hr': int,
-
-            # Totals (from Redis)
-            'total_views': int,
-            'total_comments': int,
-            'total_flags': int,
-
-            # Metadata (from Postgres)
-            'category': str,
-            'caption': str,
-            'caption_length': int,
-            'has_caption': int,
-            'uploaded_at': datetime,
-            'time_since_upload_seconds': int,
-
-            # User features (from Postgres)
-            'user_id': str,
-            'user_image_count': int,
-            'user_age_days': int,
-
-            # Latency metrics
-            'redis_latency_ms': float,
-            'postgres_latency_ms': float,
-            'total_latency_ms': float
-        }
-        """
+        
         start_time = time.time()
 
         # Fetch from both sources

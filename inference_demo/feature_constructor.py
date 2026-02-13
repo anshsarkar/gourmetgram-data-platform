@@ -1,7 +1,5 @@
 #!/usr/bin/env python3
-"""
-Feature Constructor - Transforms raw features into ML-ready vectors
-"""
+
 import logging
 from typing import Dict, Any, List
 from datetime import datetime
@@ -13,7 +11,6 @@ logger = logging.getLogger(__name__)
 
 
 class FeatureConstructor:
-    """Constructs feature vectors from raw features"""
 
     def __init__(self):
         self.categories = config.food_categories
@@ -54,14 +51,12 @@ class FeatureConstructor:
         features.append(raw_features.get('total_comments', 0))
         features.append(raw_features.get('total_flags', 0))
 
-        # === Window Aggregates (6) ===
-        # 8-10. views_1min, views_5min, views_1hr
-        features.append(raw_features.get('views_1min', 0))
+        # === Window Aggregates (4 - no 1-min due to 5-min granularity) ===
+        # 8-9. views_5min, views_1hr
         features.append(raw_features.get('views_5min', 0))
         features.append(raw_features.get('views_1hr', 0))
 
-        # 11-13. comments_1min, comments_5min, comments_1hr
-        features.append(raw_features.get('comments_1min', 0))
+        # 10-11. comments_5min, comments_1hr
         features.append(raw_features.get('comments_5min', 0))
         features.append(raw_features.get('comments_1hr', 0))
 
@@ -69,30 +64,29 @@ class FeatureConstructor:
         total_views = raw_features.get('total_views', 0)
         total_comments = raw_features.get('total_comments', 0)
         views_5min = raw_features.get('views_5min', 0)
-        views_1min = raw_features.get('views_1min', 0)
-        comments_1min = raw_features.get('comments_1min', 0)
+        comments_5min = raw_features.get('comments_5min', 0)
 
-        # 14. view_velocity_per_min = views_5min / 5
+        # 12. view_velocity_per_min = views_5min / 5
         features.append(views_5min / 5.0 if views_5min > 0 else 0.0)
 
-        # 15. comment_to_view_ratio = total_comments / max(total_views, 1)
+        # 13. comment_to_view_ratio = total_comments / max(total_views, 1)
         features.append(total_comments / max(total_views, 1))
 
-        # 16. recent_engagement_score = views_1min + (comments_1min * 5)
-        features.append(views_1min + (comments_1min * 5))
+        # 14. recent_engagement_score = views_5min + (comments_5min * 5)
+        features.append(views_5min + (comments_5min * 5))
 
         # === Content Features (2) ===
-        # 17. caption_length
+        # 15. caption_length
         features.append(raw_features.get('caption_length', 0))
 
-        # 18. has_caption (0 or 1)
+        # 16. has_caption (0 or 1)
         features.append(raw_features.get('has_caption', 0))
 
         # === User Features (2) ===
-        # 19. user_image_count
+        # 17. user_image_count
         features.append(raw_features.get('user_image_count', 0))
 
-        # 20. user_age_days
+        # 18. user_age_days
         features.append(raw_features.get('user_age_days', 0))
 
         # === Category One-Hot Encoding (11) ===
@@ -108,9 +102,9 @@ class FeatureConstructor:
         feature_vector = np.array(features, dtype=np.float32)
 
         # Validate
-        if len(feature_vector) != 31:
-            logger.error(f"Feature vector has {len(feature_vector)} dimensions, expected 31")
-            raise ValueError(f"Feature vector dimension mismatch: {len(feature_vector)} != 31")
+        if len(feature_vector) != 29:
+            logger.error(f"Feature vector has {len(feature_vector)} dimensions, expected 29")
+            raise ValueError(f"Feature vector dimension mismatch: {len(feature_vector)} != 29")
 
         if np.any(np.isnan(feature_vector)):
             logger.warning("Feature vector contains NaN values")
@@ -154,7 +148,6 @@ class FeatureConstructor:
         return "\n".join(lines)
 
     def get_feature_dict(self, feature_vector: np.ndarray) -> Dict[str, float]:
-        """Convert feature vector to dictionary for easier inspection"""
         if len(feature_vector) != len(self.feature_names):
             raise ValueError(f"Feature vector dimension mismatch")
 

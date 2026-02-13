@@ -39,7 +39,7 @@ class Config:
             "Vegetable/Fruit"  # class_10
         ]
 
-        # Feature Names (31 total)
+        # Feature Names (29 total - no 1-min windows due to 5-min granularity)
         self.feature_names = [
             # Temporal (4)
             'time_since_upload_seconds',
@@ -52,11 +52,9 @@ class Config:
             'total_comments',
             'total_flags',
 
-            # Window Aggregates (6)
-            'views_1min',
+            # Window Aggregates (4 - no 1-min)
             'views_5min',
             'views_1hr',
-            'comments_1min',
             'comments_5min',
             'comments_1hr',
 
