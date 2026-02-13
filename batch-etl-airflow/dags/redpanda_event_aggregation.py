@@ -2,6 +2,7 @@ from datetime import datetime, timedelta
 from airflow import DAG
 from airflow.operators.python import PythonOperator, PythonVirtualenvOperator
 import logging
+import os
 
 # DAG default arguments
 default_args = {
@@ -22,9 +23,19 @@ dag = DAG(
     start_date=datetime(2023, 1, 1),
     catchup=False,
     tags=['etl', 'redpanda', 'iceberg', 'windowing'],
-    # CRITICAL FIX: This allows XComs to be passed as real lists, not strings
     render_template_as_native_obj=True
 )
+
+# --- CONFIGURATION ---
+# Define the Iceberg connection details here in the DAG
+# so they are passed reliably to the isolated virtualenv.
+iceberg_config = {
+    "uri": os.getenv("ICEBERG_POSTGRES_URI", "postgresql+psycopg2://user:password@postgres:5432/gourmetgram"),
+    "warehouse": "s3://gourmetgram-datalake/warehouse",
+    "s3.endpoint": "http://minio:9000",
+    "s3.access-key-id": "admin",
+    "s3.secret-access-key": "password",
+}
 
 def consume_and_aggregate_events(**kwargs):
     import json
@@ -54,7 +65,6 @@ def consume_and_aggregate_events(**kwargs):
         group_id='airflow_event_aggregator'
     )
 
-    # Get partitions and seek
     partitions = consumer.assignment()
     if not partitions:
         consumer.poll(timeout_ms=1000)
@@ -67,7 +77,6 @@ def consume_and_aggregate_events(**kwargs):
         if offset_and_timestamp:
             consumer.seek(tp, offset_and_timestamp.offset)
 
-    # Aggregation buckets
     view_windows = defaultdict(lambda: defaultdict(int))
     comment_windows = defaultdict(lambda: defaultdict(int))
     flag_windows = defaultdict(lambda: defaultdict(int))
@@ -90,7 +99,6 @@ def consume_and_aggregate_events(**kwargs):
             else:
                 continue
 
-            # Parse timestamp
             if isinstance(ts_str, str):
                 if ts_str.endswith('Z'):
                     timestamp = datetime.fromisoformat(ts_str.replace('Z', '+00:00'))
@@ -104,7 +112,6 @@ def consume_and_aggregate_events(**kwargs):
             if timestamp < start_time: continue
             if timestamp >= end_time: break
 
-            # Bucket (5 mins)
             bucket_start = timestamp.replace(minute=(timestamp.minute // 5) * 5, second=0, microsecond=0)
 
             if topic == 'gourmetgram.views':
@@ -115,12 +122,10 @@ def consume_and_aggregate_events(**kwargs):
                 flag_windows[str(img_id)][bucket_start] += 1
 
         except Exception as e:
-            logging.error(f"Error: {e}")
             continue
 
     consumer.close()
 
-    # Helper to format records
     def to_records(windows_dict):
         rows = []
         for img_id, buckets in windows_dict.items():
@@ -134,20 +139,19 @@ def consume_and_aggregate_events(**kwargs):
                 })
         return rows
 
-    # Push to XCom using the Context (ti) which IS allowed in standard PythonOperator
     ti = kwargs['ti']
     ti.xcom_push(key='view_windows', value=to_records(view_windows))
     ti.xcom_push(key='comment_windows', value=to_records(comment_windows))
     ti.xcom_push(key='flag_windows', value=to_records(flag_windows))
 
 
-# REFACTORED: Single reusable function that takes DATA as arguments
-# No 'kwargs' or 'ti' here!
-def write_to_iceberg_task(table_name, records):
+# REFACTORED: Now accepts 'config' dictionary
+def write_to_iceberg_task(table_name, records, config):
     import logging
     import pandas as pd
     import pyarrow as pa
-    from pyiceberg.catalog import load_catalog
+    # Import SqlCatalog directly to avoid 'load_catalog' lookup errors
+    from pyiceberg.catalog.sql import SqlCatalog
 
     logging.info(f"=== Writing {table_name} to Iceberg ===")
 
@@ -157,17 +161,18 @@ def write_to_iceberg_task(table_name, records):
 
     logging.info(f"Received {len(records)} records.")
 
-    # Convert to DataFrame
     df = pd.DataFrame(records)
-    df['window_start'] = pd.to_datetime(df['window_start'], utc=True)
-    df['window_end'] = pd.to_datetime(df['window_end'], utc=True)
-    df['processed_at'] = pd.to_datetime(df['processed_at'], utc=True)
+    # Ensure columns exist before converting
+    for col in ['window_start', 'window_end', 'processed_at']:
+        if col in df.columns:
+            df[col] = pd.to_datetime(df[col], utc=True)
     
-    # Convert to PyArrow
     pa_table = pa.Table.from_pandas(df)
 
-    # Load Catalog
-    catalog = load_catalog("gourmetgram")
+    # Initialize Catalog Explicitly
+    # This bypasses the environment variable lookup that was failing
+    catalog = SqlCatalog("gourmetgram", **config)
+    
     namespace = "event_aggregations"
     identifier = f"{namespace}.{table_name}"
 
@@ -199,18 +204,19 @@ t1_consume = PythonOperator(
     dag=dag,
 )
 
-# Common requirements for virtualenv tasks
-iceberg_reqs = ['pyiceberg[s3fs,sql-postgres]==0.8.0', 'pandas', 'pyarrow']
+# Requirements: Added psycopg2-binary which is needed for SQL catalog
+iceberg_reqs = ['pyiceberg[s3fs,sql-postgres]==0.8.0', 'pandas', 'pyarrow', 'psycopg2-binary']
 
 t2_write_views = PythonVirtualenvOperator(
     task_id='write_view_windows',
     python_callable=write_to_iceberg_task,
     requirements=iceberg_reqs,
-    system_site_packages=True,
+    # FIXED: Set to False to prevent using the old system-installed pyiceberg
+    system_site_packages=False, 
     op_kwargs={
         'table_name': 'view_windows_5min',
-        # Jinja Template to fetch XCom data BEFORE the task starts
-        'records': "{{ ti.xcom_pull(task_ids='consume_and_aggregate_events', key='view_windows') }}"
+        'records': "{{ ti.xcom_pull(task_ids='consume_and_aggregate_events', key='view_windows') }}",
+        'config': iceberg_config, # Pass config explicitly
     },
     dag=dag,
 )
@@ -219,10 +225,11 @@ t3_write_comments = PythonVirtualenvOperator(
     task_id='write_comment_windows',
     python_callable=write_to_iceberg_task,
     requirements=iceberg_reqs,
-    system_site_packages=True,
+    system_site_packages=False,
     op_kwargs={
         'table_name': 'comment_windows_5min',
-        'records': "{{ ti.xcom_pull(task_ids='consume_and_aggregate_events', key='comment_windows') }}"
+        'records': "{{ ti.xcom_pull(task_ids='consume_and_aggregate_events', key='comment_windows') }}",
+        'config': iceberg_config,
     },
     dag=dag,
 )
@@ -231,10 +238,11 @@ t4_write_flags = PythonVirtualenvOperator(
     task_id='write_flag_windows',
     python_callable=write_to_iceberg_task,
     requirements=iceberg_reqs,
-    system_site_packages=True,
+    system_site_packages=False,
     op_kwargs={
         'table_name': 'flag_windows_5min',
-        'records': "{{ ti.xcom_pull(task_ids='consume_and_aggregate_events', key='flag_windows') }}"
+        'records': "{{ ti.xcom_pull(task_ids='consume_and_aggregate_events', key='flag_windows') }}",
+        'config': iceberg_config,
     },
     dag=dag,
 )
