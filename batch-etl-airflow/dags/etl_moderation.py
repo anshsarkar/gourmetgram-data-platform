@@ -291,71 +291,122 @@ def transform_features(**kwargs):
     )
 
 
+import os
+
+# Path to isolated iceberg venv python (built in Dockerfile)
+ICEBERG_PYTHON = '/home/airflow/iceberg_venv/bin/python.real'
+
+# Inline script that runs inside the iceberg venv subprocess
+ICEBERG_LOAD_SCRIPT = '''
+import sys, json, logging
+
+logging.basicConfig(level=logging.INFO)
+
+# Read input from stdin
+input_data = json.loads(sys.stdin.read())
+input_path = input_data["input_path"]
+s3_endpoint = input_data["s3_endpoint"]
+s3_key = input_data["s3_key"]
+s3_secret = input_data["s3_secret"]
+
+logging.info("=== Loading training data into Iceberg ===")
+
+import pandas as pd
+import pyarrow as pa
+from pyiceberg.catalog import load_catalog
+
+storage_options = {
+    "key": s3_key,
+    "secret": s3_secret,
+    "client_kwargs": {"endpoint_url": s3_endpoint}
+}
+
+try:
+    df = pd.read_parquet(input_path, storage_options=storage_options)
+except Exception as e:
+    logging.warning(f"No data found at {input_path} or error reading: {e}")
+    sys.exit(0)
+
+if df.empty:
+    logging.info("No data to load.")
+    sys.exit(0)
+
+pa_table = pa.Table.from_pandas(df)
+
+logging.info("Connecting to catalog...")
+catalog = load_catalog("gourmetgram")
+
+namespace = "moderation"
+table_name = "training_data"
+identifier = f"{namespace}.{table_name}"
+
+try:
+    catalog.create_namespace(namespace)
+    logging.info(f"Namespace '{namespace}' created or exists.")
+except Exception:
+    pass
+
+try:
+    table = catalog.load_table(identifier)
+    logging.info(f"Table {identifier} exists. Appending data...")
+    table.append(pa_table)
+except Exception:
+    logging.info(f"Table {identifier} does not exist. Creating...")
+    table = catalog.create_table(identifier, schema=pa_table.schema)
+    table.append(pa_table)
+
+logging.info(f"Successfully loaded {len(df)} rows into Iceberg table {identifier}")
+'''
+
+
 def load_iceberg(**kwargs):
-    import logging
-    from pyiceberg.catalog import load_catalog
-    import pandas as pd
-    import pyarrow as pa
-    import s3fs
-    
-    logging.info("Loading into Iceberg...")
-    
-    # Check if we have data to load
+    import json
+    import subprocess
+
+    logging.info("Loading into Iceberg via isolated subprocess...")
+
     s3_endpoint = 'http://minio:9000'
     bucket = 'gourmetgram-datalake'
-    storage_options = {
-        "key": "admin",
-        "secret": "password",
-        "client_kwargs": {"endpoint_url": s3_endpoint}
-    }
-    
     input_path = f"s3://{bucket}/processed/training_data.parquet"
-    
-    try:
-        df = pd.read_parquet(input_path, storage_options=storage_options)
-    except Exception as e:
-        logging.warning(f"No data found at {input_path} or error reading: {e}")
-        return
 
-    if df.empty:
-        logging.info("No data to load.")
-        return
+    # Build a minimal, clean environment for the subprocess
+    subprocess_env = {
+        'HOME': os.environ.get('HOME', '/home/airflow'),
+        'PATH': '/usr/local/bin:/usr/bin:/bin',
+        'PYTHONNOUSERSITE': '1',
+    }
+    # Pass through PyIceberg catalog config env vars
+    for key, val in os.environ.items():
+        if key.startswith('PYICEBERG_CATALOG__'):
+            subprocess_env[key] = val
 
-    # Convert to PyArrow Table
-    pa_table = pa.Table.from_pandas(df)
-    
-    # Load Catalog
-    # Uses env vars passed via env_vars param in operator
-    logging.info("Connecting to catalog...")
-    catalog = load_catalog("gourmetgram")
-    
-    # Namespace and Table
-    namespace = "moderation"
-    table_name = "training_data"
-    identifier = f"{namespace}.{table_name}"
-    
-    # Create Namespace if not exists
-    try:
-        catalog.create_namespace(namespace)
-        logging.info(f"Namespace '{namespace}' created or exists.")
-    except Exception:
-        # Ignore if exists
-        pass
-        
-    # Create or Append to Table
-    try:
-        table = catalog.load_table(identifier)
-        logging.info(f"Table {identifier} exists. Appending data...")
-        table.append(pa_table)
-    except Exception: # NoSuchTableError ideally, but generic catch for now
-        logging.info(f"Table {identifier} does not exist. Creating...")
-        table = catalog.create_table(
-            identifier,
-            schema=pa_table.schema
+    input_data = json.dumps({
+        'input_path': input_path,
+        's3_endpoint': s3_endpoint,
+        's3_key': 'admin',
+        's3_secret': 'password',
+    })
+
+    result = subprocess.run(
+        [ICEBERG_PYTHON, '-I', '-c', ICEBERG_LOAD_SCRIPT],
+        input=input_data,
+        capture_output=True,
+        text=True,
+        env=subprocess_env,
+    )
+
+    # Log stdout/stderr from subprocess
+    if result.stdout:
+        for line in result.stdout.strip().split('\n'):
+            logging.info(f"[iceberg] {line}")
+    if result.stderr:
+        for line in result.stderr.strip().split('\n'):
+            logging.info(f"[iceberg] {line}")
+
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"Iceberg load failed (exit {result.returncode}):\n{result.stderr}"
         )
-        table.append(pa_table)
-        
-    logging.info(f"Successfully loaded {len(df)} rows into Iceberg table {identifier}")
 
 
 t1 = PythonOperator(
@@ -370,27 +421,9 @@ t2 = PythonOperator(
     dag=dag,
 )
 
-from airflow.operators.python import PythonVirtualenvOperator
-import os
-
-# Capture necessary environment variables for PyIceberg
-iceberg_env_vars = {
-    key: os.environ.get(key)
-    for key in os.environ
-    if key.startswith("PYICEBERG_CATALOG__")
-}
-
-t3 = PythonVirtualenvOperator(
+t3 = PythonOperator(
     task_id='load_iceberg',
     python_callable=load_iceberg,
-    requirements=[
-        "pyiceberg[s3fs,sql-postgres]==0.8.0",
-        "pandas<2.2",
-        "pyarrow",
-        "sqlalchemy>=2.0"
-    ],
-    system_site_packages=False,
-    env_vars=iceberg_env_vars,
     dag=dag,
 )
 
