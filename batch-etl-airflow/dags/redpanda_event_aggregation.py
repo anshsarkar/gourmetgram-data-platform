@@ -207,10 +207,6 @@ def consume_and_aggregate_events(**kwargs):
 
 def write_view_windows_to_iceberg(records):
     """Task 2: Write view window aggregations to Iceberg"""
-    import sys
-    # Remove user site-packages so venv's sqlalchemy 2.0 is used, not host's 1.4
-    sys.path = [p for p in sys.path if '/.local/' not in p]
-
     import logging
     from pyiceberg.catalog import load_catalog
     import pandas as pd
@@ -257,10 +253,6 @@ def write_view_windows_to_iceberg(records):
 
 def write_comment_windows_to_iceberg(records):
     """Task 3: Write comment window aggregations to Iceberg"""
-    import sys
-    # Remove user site-packages so venv's sqlalchemy 2.0 is used, not host's 1.4
-    sys.path = [p for p in sys.path if '/.local/' not in p]
-
     import logging
     from pyiceberg.catalog import load_catalog
     import pandas as pd
@@ -307,10 +299,6 @@ def write_comment_windows_to_iceberg(records):
 
 def write_flag_windows_to_iceberg(records):
     """Task 4: Write flag window aggregations to Iceberg"""
-    import sys
-    # Remove user site-packages so venv's sqlalchemy 2.0 is used, not host's 1.4
-    sys.path = [p for p in sys.path if '/.local/' not in p]
-
     import logging
     from pyiceberg.catalog import load_catalog
     import pandas as pd
@@ -362,11 +350,21 @@ t1_consume = PythonOperator(
     dag=dag,
 )
 
+# Capture PyIceberg env vars + disable user site-packages in venv subprocess
+import os
+iceberg_env_vars = {
+    key: os.environ.get(key)
+    for key in os.environ
+    if key.startswith("PYICEBERG_CATALOG__")
+}
+iceberg_env_vars['PYTHONNOUSERSITE'] = '1'
+
 t2_write_views = PythonVirtualenvOperator(
     task_id='write_view_windows',
     python_callable=write_view_windows_to_iceberg,
     requirements=['pyiceberg[s3fs,sql-postgres]==0.8.0', 'pandas', 'pyarrow', 'sqlalchemy>=2.0', 'psycopg2-binary'],
     system_site_packages=False,
+    env_vars=iceberg_env_vars,
     op_kwargs={
         'records': "{{ ti.xcom_pull(task_ids='consume_and_aggregate_events', key='view_windows') }}",
     },
@@ -378,6 +376,7 @@ t3_write_comments = PythonVirtualenvOperator(
     python_callable=write_comment_windows_to_iceberg,
     requirements=['pyiceberg[s3fs,sql-postgres]==0.8.0', 'pandas', 'pyarrow', 'sqlalchemy>=2.0', 'psycopg2-binary'],
     system_site_packages=False,
+    env_vars=iceberg_env_vars,
     op_kwargs={
         'records': "{{ ti.xcom_pull(task_ids='consume_and_aggregate_events', key='comment_windows') }}",
     },
@@ -389,6 +388,7 @@ t4_write_flags = PythonVirtualenvOperator(
     python_callable=write_flag_windows_to_iceberg,
     requirements=['pyiceberg[s3fs,sql-postgres]==0.8.0', 'pandas', 'pyarrow', 'sqlalchemy>=2.0', 'psycopg2-binary'],
     system_site_packages=False,
+    env_vars=iceberg_env_vars,
     op_kwargs={
         'records': "{{ ti.xcom_pull(task_ids='consume_and_aggregate_events', key='flag_windows') }}",
     },
