@@ -45,8 +45,8 @@ DATABASE_URL    = os.getenv(
 )
 REDPANDA_BROKERS = os.getenv("REDPANDA_BROKERS", "localhost:19092")
 AIRFLOW_BASE    = os.getenv("AIRFLOW_BASE", "http://localhost:8080")
-AIRFLOW_USER    = os.getenv("AIRFLOW_USER", "airflow")
-AIRFLOW_PASS    = os.getenv("AIRFLOW_PASS", "airflow")
+AIRFLOW_USER    = os.getenv("AIRFLOW_USER", "admin")
+AIRFLOW_PASS    = os.getenv("AIRFLOW_PASS", "admin")
 MINIO_ENDPOINT  = os.getenv("MINIO_ENDPOINT", "http://localhost:9000")
 
 # Number of events to send — keep small so counts are easy to verify
