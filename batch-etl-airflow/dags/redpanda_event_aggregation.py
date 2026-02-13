@@ -143,28 +143,30 @@ def write_to_iceberg_task(table_name, records, config):
     import sys
     import logging
     
-    # --- CRITICAL FIX: CLEAN THE PATH ---
-    # Airflow forces /home/airflow/.local into sys.path even in virtualenvs.
-    # This causes the task to load the WRONG PyIceberg version (the system one).
-    # We filter sys.path to REMOVE any path starting with /home/airflow/.local
-    # This forces Python to use the libraries installed in /tmp/venv...
-    initial_paths = list(sys.path)
-    sys.path = [p for p in sys.path if not p.startswith('/home/airflow/.local')]
+    # --- SURGICAL FIX: REMOVE ONLY THE CONFLICTING LIBRARY ---
+    # Instead of wiping all system paths (which kills pandas),
+    # we find where the OLD pyiceberg is and remove ONLY that path.
     
-    logging.info("=== Path Debugging ===")
-    logging.info(f"Removed system paths. Using: {sys.path[:3]}...")
+    # 1. Force un-import if it was already loaded by Airflow machinery
+    if 'pyiceberg' in sys.modules:
+        del sys.modules['pyiceberg']
+        
+    # 2. Remove any path from sys.path that contains the system 'pyiceberg'
+    # This forces Python to look in the virtualenv's site-packages first.
+    sys.path = [p for p in sys.path if "site-packages/pyiceberg" not in p]
 
-    import pandas as pd
-    import pyarrow as pa
-    
-    # Import SqlCatalog directly (Available in PyIceberg 0.8.0)
+    # 3. Explicitly verify imports
     try:
+        import pandas as pd
+        import pyarrow as pa
+        # Import the new SqlCatalog (only available in 0.8.0)
         from pyiceberg.catalog.sql import SqlCatalog
-    except ImportError as e:
-        # If this fails, print debug info
         import pyiceberg
-        logging.error(f"Failed to import SqlCatalog. PyIceberg file: {pyiceberg.__file__}")
-        logging.error(f"PyIceberg version: {pyiceberg.__version__}")
+        logging.info(f"Using PyIceberg from: {pyiceberg.__file__}")
+        logging.info(f"PyIceberg version: {pyiceberg.__version__}")
+    except ImportError as e:
+        logging.error(f"Import failed: {e}")
+        logging.error(f"Current sys.path: {sys.path}")
         raise e
 
     logging.info(f"=== Writing {table_name} to Iceberg ===")
@@ -183,7 +185,6 @@ def write_to_iceberg_task(table_name, records, config):
     pa_table = pa.Table.from_pandas(df)
 
     # Initialize SqlCatalog directly
-    # config['uri'] contains the postgres connection string
     catalog = SqlCatalog("gourmetgram", **config)
     
     namespace = "event_aggregations"
@@ -229,7 +230,7 @@ t2_write_views = PythonVirtualenvOperator(
     task_id='write_view_windows',
     python_callable=write_to_iceberg_task,
     requirements=iceberg_reqs,
-    system_site_packages=False, 
+    system_site_packages=True, 
     op_kwargs={
         'table_name': 'view_windows_5min',
         'records': "{{ ti.xcom_pull(task_ids='consume_and_aggregate_events', key='view_windows') }}",
@@ -242,7 +243,7 @@ t3_write_comments = PythonVirtualenvOperator(
     task_id='write_comment_windows',
     python_callable=write_to_iceberg_task,
     requirements=iceberg_reqs,
-    system_site_packages=False,
+    system_site_packages=True,
     op_kwargs={
         'table_name': 'comment_windows_5min',
         'records': "{{ ti.xcom_pull(task_ids='consume_and_aggregate_events', key='comment_windows') }}",
@@ -255,7 +256,7 @@ t4_write_flags = PythonVirtualenvOperator(
     task_id='write_flag_windows',
     python_callable=write_to_iceberg_task,
     requirements=iceberg_reqs,
-    system_site_packages=False,
+    system_site_packages=True,
     op_kwargs={
         'table_name': 'flag_windows_5min',
         'records': "{{ ti.xcom_pull(task_ids='consume_and_aggregate_events', key='flag_windows') }}",
