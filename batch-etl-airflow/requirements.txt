@@ -1,6 +1,7 @@
 apache-airflow-providers-postgres
 apache-airflow-providers-amazon
 pandas
+s3fs
 sqlalchemy<2.0
 psycopg2-binary
 pyarrow

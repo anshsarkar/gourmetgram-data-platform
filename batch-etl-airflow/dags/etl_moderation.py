@@ -75,7 +75,6 @@ def transform_features(**kwargs):
     import pandas as pd
     import s3fs
     import numpy as np
-    from pyiceberg.catalog import load_catalog
 
     s3_endpoint = 'http://minio:9000'
     bucket = 'gourmetgram-datalake'
@@ -105,6 +104,7 @@ def transform_features(**kwargs):
     # Load windowed aggregations from Iceberg
     logging.info("Loading windowed aggregations from Iceberg...")
     try:
+        from pyiceberg.catalog import load_catalog
         catalog = load_catalog("gourmetgram")
         view_windows_df = catalog.load_table("event_aggregations.view_windows_5min").scan().to_pandas()
         comment_windows_df = catalog.load_table("event_aggregations.comment_windows_5min").scan().to_pandas()

@@ -141,6 +141,27 @@ services:
       - "9001:9001"
     volumes:
       - minio_data:/data
+    healthcheck:
+      test: [ "CMD-SHELL", "curl -sf http://localhost:9000/minio/health/live || exit 1" ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Create required MinIO buckets
+  minio-init:
+    image: minio/mc
+    container_name: gourmetgram_minio_init
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: /bin/sh
+    command:
+      - -c
+      - |
+        mc alias set myminio http://minio:9000 admin password
+        mc mb --ignore-existing myminio/gourmetgram-datalake
+        mc mb --ignore-existing myminio/gourmetgram-images
+        echo "Buckets created successfully"
 
   # RedPanda (Kafka-compatible message broker)
   redpanda:
