@@ -4,7 +4,6 @@ from airflow.operators.python import PythonOperator, PythonVirtualenvOperator
 import logging
 import os
 
-# DAG default arguments
 default_args = {
     'owner': 'gourmetgram',
     'depends_on_past': False,
@@ -14,9 +13,9 @@ default_args = {
     'retry_delay': timedelta(minutes=5),
 }
 
-# Create DAG
+# Change DAG ID to v4 to ensure no caching
 dag = DAG(
-    'redpanda_event_aggregation',
+    'redpanda_event_aggregation_v4',
     default_args=default_args,
     description='Aggregate Redpanda events into 5-minute windows for training',
     schedule_interval=timedelta(hours=1),
@@ -26,9 +25,7 @@ dag = DAG(
     render_template_as_native_obj=True
 )
 
-# --- CONFIGURATION ---
-# Define the Iceberg connection details here in the DAG
-# so they are passed reliably to the isolated virtualenv.
+# --- Configuration for Iceberg ---
 iceberg_config = {
     "uri": os.getenv("ICEBERG_POSTGRES_URI", "postgresql+psycopg2://user:password@postgres:5432/gourmetgram"),
     "warehouse": "s3://gourmetgram-datalake/warehouse",
@@ -44,14 +41,11 @@ def consume_and_aggregate_events(**kwargs):
     from datetime import datetime, timezone, timedelta
 
     logging.info("=== Starting Redpanda Event Aggregation ===")
-
-    # Calculate time range: last hour
+    
     end_time = datetime.now(timezone.utc)
     start_time = end_time - timedelta(hours=1)
-
     logging.info(f"Processing events from {start_time} to {end_time}")
 
-    # Initialize Kafka consumer
     bootstrap_servers = 'redpanda:9092'
     topics = ['gourmetgram.views', 'gourmetgram.comments', 'gourmetgram.flags']
 
@@ -99,6 +93,7 @@ def consume_and_aggregate_events(**kwargs):
             else:
                 continue
 
+            # Robust timestamp parsing
             if isinstance(ts_str, str):
                 if ts_str.endswith('Z'):
                     timestamp = datetime.fromisoformat(ts_str.replace('Z', '+00:00'))
@@ -120,10 +115,8 @@ def consume_and_aggregate_events(**kwargs):
                 comment_windows[str(img_id)][bucket_start] += 1
             elif topic == 'gourmetgram.flags':
                 flag_windows[str(img_id)][bucket_start] += 1
-
-        except Exception as e:
+        except Exception:
             continue
-
     consumer.close()
 
     def to_records(windows_dict):
@@ -145,13 +138,34 @@ def consume_and_aggregate_events(**kwargs):
     ti.xcom_push(key='flag_windows', value=to_records(flag_windows))
 
 
-# REFACTORED: Now accepts 'config' dictionary
+# === THE FIXED TASK FUNCTION ===
 def write_to_iceberg_task(table_name, records, config):
+    import sys
     import logging
+    
+    # --- CRITICAL FIX: CLEAN THE PATH ---
+    # Airflow forces /home/airflow/.local into sys.path even in virtualenvs.
+    # This causes the task to load the WRONG PyIceberg version (the system one).
+    # We filter sys.path to REMOVE any path starting with /home/airflow/.local
+    # This forces Python to use the libraries installed in /tmp/venv...
+    initial_paths = list(sys.path)
+    sys.path = [p for p in sys.path if not p.startswith('/home/airflow/.local')]
+    
+    logging.info("=== Path Debugging ===")
+    logging.info(f"Removed system paths. Using: {sys.path[:3]}...")
+
     import pandas as pd
     import pyarrow as pa
-    # Use the public API, which is stable across versions
-    from pyiceberg.catalog import load_catalog
+    
+    # Import SqlCatalog directly (Available in PyIceberg 0.8.0)
+    try:
+        from pyiceberg.catalog.sql import SqlCatalog
+    except ImportError as e:
+        # If this fails, print debug info
+        import pyiceberg
+        logging.error(f"Failed to import SqlCatalog. PyIceberg file: {pyiceberg.__file__}")
+        logging.error(f"PyIceberg version: {pyiceberg.__version__}")
+        raise e
 
     logging.info(f"=== Writing {table_name} to Iceberg ===")
 
@@ -161,31 +175,16 @@ def write_to_iceberg_task(table_name, records, config):
 
     logging.info(f"Received {len(records)} records.")
 
-    # 1. Prepare DataFrame
     df = pd.DataFrame(records)
-    # Convert timestamps if columns exist
     for col in ['window_start', 'window_end', 'processed_at']:
         if col in df.columns:
             df[col] = pd.to_datetime(df[col], utc=True)
     
     pa_table = pa.Table.from_pandas(df)
 
-    # 2. Configure Catalog Explicitly
-    # We construct the properties dict expected by PyIceberg
-    catalog_properties = {
-        "type": "sql",
-        "uri": config["uri"],
-        "warehouse": config["warehouse"],
-        "s3.endpoint": config["s3.endpoint"],
-        "s3.access-key-id": config["s3.access-key-id"],
-        "s3.secret-access-key": config["s3.secret-access-key"],
-    }
-
-    logging.info("Loading catalog with explicit config...")
-    
-    # 3. Load Catalog
-    # This works now because system_site_packages=False ensures we use PyIceberg 0.8.0
-    catalog = load_catalog("gourmetgram", **catalog_properties)
+    # Initialize SqlCatalog directly
+    # config['uri'] contains the postgres connection string
+    catalog = SqlCatalog("gourmetgram", **config)
     
     namespace = "event_aggregations"
     identifier = f"{namespace}.{table_name}"
@@ -211,27 +210,25 @@ def write_to_iceberg_task(table_name, records, config):
         table = catalog.create_table(identifier, schema=schema)
         table.append(pa_table)
 
-# Define Tasks
+
 t1_consume = PythonOperator(
     task_id='consume_and_aggregate_events',
     python_callable=consume_and_aggregate_events,
     dag=dag,
 )
 
-# Requirements: Added psycopg2-binary which is needed for SQL catalog
 iceberg_reqs = [
     'pyiceberg[s3fs,sql-postgres]==0.8.0', 
     'pandas', 
     'pyarrow', 
     'psycopg2-binary',
-    'sqlalchemy>=2.0.0' 
+    'sqlalchemy>=2.0.0'
 ]
 
 t2_write_views = PythonVirtualenvOperator(
     task_id='write_view_windows',
     python_callable=write_to_iceberg_task,
     requirements=iceberg_reqs,
-    # CRITICAL: Must be False to prevent Airflow's old libraries from interfering
     system_site_packages=False, 
     op_kwargs={
         'table_name': 'view_windows_5min',
