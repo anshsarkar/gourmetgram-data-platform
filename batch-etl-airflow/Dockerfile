@@ -27,6 +27,7 @@ RUN python -m venv /home/airflow/iceberg_venv \
        'pandas' \
        'pyarrow' \
        'psycopg2-binary' \
+    && /home/airflow/iceberg_venv/bin/pip install --no-cache-dir --upgrade \
        'fsspec>=2024.10.0' \
        's3fs' \
     && cp /home/airflow/iceberg_venv/bin/python /home/airflow/iceberg_venv/bin/python.real
