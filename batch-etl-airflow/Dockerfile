@@ -19,8 +19,8 @@ COPY requirements.txt /requirements.txt
 RUN pip install --no-cache-dir -r /requirements.txt
 
 # Create isolated venv for pyiceberg (needs sqlalchemy>=2.0, incompatible with Airflow's <2.0)
-RUN python -m venv --without-pip /home/airflow/iceberg_venv \
-    && PYTHONNOUSERSITE=1 python -m pip install --no-cache-dir --prefix=/home/airflow/iceberg_venv \
+RUN python -m venv /home/airflow/iceberg_venv \
+    && /home/airflow/iceberg_venv/bin/pip install --no-cache-dir \
        'pyiceberg[s3fs,sql-postgres]==0.8.0' \
        'sqlalchemy>=2.0' \
        'pandas' \
