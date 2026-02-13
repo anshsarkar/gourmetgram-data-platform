@@ -211,13 +211,11 @@ def process_flag_event(event_data: Dict[str, Any]):
 def get_image_features(image_id: str) -> Dict[str, Any]:
     timestamp = time.time()
 
-    # Get window counts for views
-    views_1min = _get_window_count(image_id, timestamp, config.window_1min, "views")
+    # Get window counts for views (no 1-min for train-test parity)
     views_5min = _get_window_count(image_id, timestamp, config.window_5min, "views")
     views_1hr = _get_window_count(image_id, timestamp, config.window_1hr, "views")
 
-    # Get window counts for comments (now using sorted sets like views)
-    comments_1min = _get_window_count(image_id, timestamp, config.window_1min, "comments")
+    # Get window counts for comments (no 1-min for train-test parity)
     comments_5min = _get_window_count(image_id, timestamp, config.window_5min, "comments")
     comments_1hr = _get_window_count(image_id, timestamp, config.window_1hr, "comments")
 
@@ -228,18 +226,30 @@ def get_image_features(image_id: str) -> Dict[str, Any]:
 
     # Get metadata
     metadata = redis_client.hgetall(f"image:{image_id}:metadata")
+    caption_length = int(metadata.get('caption_length', 0))
+    uploaded_at_str = metadata.get('uploaded_at', '')
 
-    # Compute derived features
+    # Compute derived features (using 5-min windows instead of 1-min)
     view_velocity = views_5min / 5.0 if views_5min > 0 else 0.0
     comment_ratio = total_comments / max(total_views, 1)
-    recent_engagement = views_1min + (comments_1min * 5)  # Weight comments 5x
+    recent_engagement = views_5min + (comments_5min * 5)  # Weight comments 5x
+
+    # Compute temporal features
+    has_caption = 1 if caption_length > 0 else 0
+
+    # Compute time_since_upload_seconds
+    time_since_upload_seconds = 0
+    if uploaded_at_str:
+        try:
+            uploaded_at = datetime.fromisoformat(uploaded_at_str.replace('Z', '+00:00'))
+            time_since_upload_seconds = int(timestamp - uploaded_at.timestamp())
+        except Exception:
+            pass
 
     return {
-        # Window features
-        'views_1min': views_1min,
+        # Window features (4 total, no 1-min)
         'views_5min': views_5min,
         'views_1hr': views_1hr,
-        'comments_1min': comments_1min,
         'comments_5min': comments_5min,
         'comments_1hr': comments_1hr,
 
@@ -253,10 +263,16 @@ def get_image_features(image_id: str) -> Dict[str, Any]:
         'comment_ratio': comment_ratio,
         'recent_engagement': recent_engagement,
 
+        # Content features
+        'caption_length': caption_length,
+        'has_caption': has_caption,
+
+        # Temporal features
+        'time_since_upload_seconds': time_since_upload_seconds,
+        'uploaded_at': uploaded_at_str,
+
         # Metadata
         'category': metadata.get('category', 'unknown'),
-        'caption_length': int(metadata.get('caption_length', 0)),
-        'uploaded_at': metadata.get('uploaded_at', ''),
         'user_id': metadata.get('user_id', '')
     }
 

@@ -72,7 +72,6 @@ class StreamConsumer:
             raise
 
     def close(self):
-        """Close consumer and commit offsets"""
         if self.consumer:
             logger.info("=" * 60)
             logger.info("KAFKA CONSUMER STATISTICS")

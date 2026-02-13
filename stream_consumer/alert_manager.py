@@ -8,7 +8,7 @@ from config import config
 logger = logging.getLogger(__name__)
 
 # Maximum number of images to track for each alert type (LRU eviction)
-MAX_ALERT_TRACKING = 10000
+MAX_ALERT_TRACKING = 1000
 
 # Track which images have already triggered alerts to avoid spam
 # Using OrderedDict for LRU eviction
@@ -21,7 +21,6 @@ _alerted_images = {
 
 
 def _add_to_alert_tracking(alert_type: str, image_id: str):
-    """Add image to alert tracking with LRU eviction"""
     _alerted_images[alert_type][image_id] = True
     _alerted_images[alert_type].move_to_end(image_id)
 
@@ -40,17 +39,6 @@ def check_and_alert(
     comments_1min: int,
     total_views: int
 ):
-    """
-    Check if any alert thresholds are exceeded and log alerts
-
-    Alert Types:
-    - Viral Content: >100 views in 5 minutes
-    - Suspicious Activity: >10 comments in 1 minute
-    - Popular Post: >50 views in 1 hour
-    - View Milestones: 100, 1000, 10000 views
-
-    Uses LRU eviction to prevent unbounded memory growth (max 10k images per alert type)
-    """
 
     # 1. Check for viral content (high views in short time)
     if views_5min >= config.viral_threshold_views_5min:
@@ -87,7 +75,6 @@ def check_and_alert(
 
 
 def _check_milestones(image_id: str, total_views: int):
-    """Check if image has reached any view milestones"""
     # Initialize milestone tracking for this image if needed
     if image_id not in _alerted_images['milestones']:
         _alerted_images['milestones'][image_id] = set()
@@ -105,14 +92,6 @@ def _check_milestones(image_id: str, total_views: int):
             # Move to end for LRU tracking
             _alerted_images['milestones'].move_to_end(image_id)
 
-            # TODO: In a production system, write milestone to Postgres for persistence
-            # Example:
-            # db.execute(
-            #     "INSERT INTO image_milestones (image_id, milestone_type, milestone_value, reached_at) "
-            #     "VALUES (%s, 'views', %s, NOW())",
-            #     (image_id, milestone)
-            # )
-
     # Evict oldest milestone tracking if over limit
     if len(_alerted_images['milestones']) > MAX_ALERT_TRACKING:
         oldest_key = next(iter(_alerted_images['milestones']))
@@ -121,7 +100,6 @@ def _check_milestones(image_id: str, total_views: int):
 
 
 def get_alert_stats() -> dict:
-    """Get statistics on alerts triggered"""
     return {
         'viral_alerts': len(_alerted_images['viral']),
         'suspicious_alerts': len(_alerted_images['suspicious']),
@@ -131,7 +109,6 @@ def get_alert_stats() -> dict:
 
 
 def reset_alerts():
-    """Reset all alert tracking (useful for testing)"""
     global _alerted_images
     _alerted_images = {
         'viral': OrderedDict(),

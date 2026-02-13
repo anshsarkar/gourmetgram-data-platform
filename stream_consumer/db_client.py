@@ -39,11 +39,6 @@ class DatabaseClient:
             logger.info("Database connection closed")
 
     def persist_milestone(self, image_id: str, milestone_type: str, milestone_value: int, reached_at: float) -> bool:
-        """
-        Persist a milestone to the database. Returns True if successfully persisted, False if skipped (already exists).
-
-        Uses a tracking mechanism to avoid duplicate inserts for the same milestone.
-        """
         # Create tracking key
         tracking_key = f"{image_id}:{milestone_type}:{milestone_value}"
 
@@ -102,7 +97,6 @@ class DatabaseClient:
             return False
 
     def get_milestones_for_image(self, image_id: str) -> list:
-        """Retrieve all milestones for a specific image."""
         try:
             with self.conn.cursor() as cursor:
                 cursor.execute(
