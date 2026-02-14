@@ -283,6 +283,37 @@ services:
       - VIRAL_THRESHOLD_VIEWS_5MIN=100
       - SUSPICIOUS_THRESHOLD_COMMENTS_1MIN=10
       - POPULAR_THRESHOLD_VIEWS_1HR=50
+      - MODERATION_TOPIC=gourmetgram.moderation_requests
+    depends_on:
+      redpanda:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # Moderation Inference Service
+  inference_service:
+    build:
+      context: ../inference_service
+      dockerfile: Dockerfile
+    container_name: inference-service
+    environment:
+      - KAFKA_BOOTSTRAP_SERVERS=redpanda:9092
+      - KAFKA_CONSUMER_GROUP=gourmetgram-moderation
+      - MODERATION_TOPIC=gourmetgram.moderation_requests
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_DB=0
+      - DATABASE_URL=postgresql://user:password@postgres:5432/gourmetgram
+      - S3_ENDPOINT_URL=http://minio:9000
+      - AWS_ACCESS_KEY_ID=admin
+      - AWS_SECRET_ACCESS_KEY=password
+      - MODEL_BUCKET=gourmetgram-datalake
+      - MODEL_PREFIX=models/moderation/
+      - MODEL_CHECK_INTERVAL=30
+      - LOG_LEVEL=INFO
     depends_on:
       redpanda:
         condition: service_healthy
