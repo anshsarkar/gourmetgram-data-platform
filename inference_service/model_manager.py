@@ -98,27 +98,53 @@ class ModelManager:
         self.model_loaded_at = time.time()
         logger.info(f"Model v{self.model_version} loaded successfully!")
 
+    # Indices of the 13 numeric features in the 26-dim vector that the
+    # training notebook's StandardScaler was fitted on.
+    # (is_weekend at index 3 and has_caption at index 12 are treated as
+    # categorical in the training notebook, so they are excluded here.)
+    NUMERIC_INDICES = [0, 1, 2, 4, 5, 6, 7, 8, 9, 10, 11, 13, 14]
+
+    # Food-11 categories in order (class_00..class_10) — must match training
+    CATEGORY_NAMES = [
+        "Bread", "Dairy product", "Dessert", "Egg", "Fried food",
+        "Meat", "Noodles/Pasta", "Rice", "Seafood", "Soup", "Vegetable/Fruit"
+    ]
+
     def predict(self, feature_vector: np.ndarray) -> dict:
         """Run model inference on a 26-dim feature vector.
 
-        The feature vector layout:
-          [0:15]  = numeric features (scaled by StandardScaler)
-          [15:26] = category one-hot (already binary, no scaling needed)
+        The feature vector layout (from feature_constructor.py):
+          [0:15]  = 15 values (13 numeric + is_weekend@3 + has_caption@12)
+          [15:26] = 11 category one-hot flags
+
+        The training notebook splits these as:
+          numeric_features  (13) → StandardScaler
+          categorical_features (is_weekend, has_caption, category) → OneHotEncoder
         """
         if self.model is None:
             raise RuntimeError("No model loaded")
 
-        numeric = feature_vector[:15].reshape(1, -1)
-        category_onehot = feature_vector[15:].reshape(1, -1)
-
-        # Scale numeric features using the training scaler
+        # 1. Extract the 13 numeric features the scaler expects
+        numeric = feature_vector[self.NUMERIC_INDICES].reshape(1, -1)
         X_scaled = self.scaler.transform(numeric)
 
-        # Concatenate: scaled numeric + raw one-hot categories
-        # Note: The training notebook's OneHotEncoder produced similar binary columns.
-        # Since feature_constructor.py already one-hot encodes categories in the same
-        # order as training, we use them directly instead of re-encoding.
-        X = np.hstack([X_scaled, category_onehot])
+        # 2. Reconstruct the 3 categorical values as strings (matching training)
+        is_weekend = str(int(feature_vector[3]))     # "0" or "1"
+        has_caption = str(int(feature_vector[12]))    # "0" or "1"
+
+        # Decode category from one-hot (indices 15-25)
+        cat_onehot = feature_vector[15:26]
+        cat_idx = np.argmax(cat_onehot)
+        if cat_onehot[cat_idx] == 1 and cat_idx < len(self.CATEGORY_NAMES):
+            category = self.CATEGORY_NAMES[cat_idx]
+        else:
+            category = "Unknown"
+
+        cat_array = np.array([[is_weekend, has_caption, category]])
+        X_cat = self.encoder.transform(cat_array)
+
+        # 3. Concatenate scaled numeric + encoded categorical
+        X = np.hstack([X_scaled, X_cat])
 
         prob = self.model.predict_proba(X)[0][1]  # P(needs_moderation)
 
