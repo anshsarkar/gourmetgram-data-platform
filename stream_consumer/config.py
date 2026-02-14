@@ -31,6 +31,9 @@ class Config:
         # View Milestones for Persistence
         self.view_milestones = [10, 100, 1000]
 
+        # Moderation Request Topic (inference service listens on this)
+        self.moderation_topic = os.getenv("MODERATION_TOPIC", "gourmetgram.moderation_requests")
+
         # Logging Configuration
         self.log_level = os.getenv("LOG_LEVEL", "INFO")
 

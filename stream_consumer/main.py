@@ -8,7 +8,7 @@ from config import config
 from redis_client import redis_client
 from db_client import db_client
 from kafka_consumer import stream_consumer
-from alert_manager import get_alert_stats
+from alert_manager import get_alert_stats, init_producer
 import aggregators
 
 
@@ -114,6 +114,10 @@ def main():
         # Connect to database for milestone persistence
         logger.info("Connecting to PostgreSQL...")
         db_client.connect()
+
+        # Initialize moderation request producer
+        logger.info("Initializing moderation request producer...")
+        init_producer()
 
         # Connect to Kafka
         logger.info("Connecting to Kafka...")
