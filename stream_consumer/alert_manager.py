@@ -1,11 +1,45 @@
 #!/usr/bin/env python3
+import json
 import logging
+import time
 from typing import Optional
 from collections import OrderedDict
 
+from kafka import KafkaProducer
 from config import config
 
 logger = logging.getLogger(__name__)
+
+# Kafka producer for publishing moderation requests
+_producer = None
+
+
+def init_producer():
+    """Initialize the Kafka producer for moderation requests.
+    Called from main.py after connections are established."""
+    global _producer
+    try:
+        _producer = KafkaProducer(
+            bootstrap_servers=config.kafka_bootstrap_servers,
+            value_serializer=lambda v: json.dumps(v).encode('utf-8')
+        )
+        logger.info(f"Moderation producer initialized (topic: {config.moderation_topic})")
+    except Exception as e:
+        logger.error(f"Failed to initialize moderation producer: {e}")
+
+
+def _publish_moderation_request(image_id: str, trigger_type: str, context: dict):
+    """Publish a moderation request to Kafka for the inference service."""
+    if _producer is None:
+        return
+    msg = {
+        "image_id": image_id,
+        "trigger": trigger_type,
+        "context": context,
+        "timestamp": time.time()
+    }
+    _producer.send(config.moderation_topic, value=msg)
+    logger.info(f"Published moderation request for {image_id[:8]}... (trigger: {trigger_type})")
 
 # Maximum number of images to track for each alert type (LRU eviction)
 MAX_ALERT_TRACKING = 1000
@@ -49,6 +83,7 @@ def check_and_alert(
                 f"(threshold: {config.viral_threshold_views_5min})"
             )
             _add_to_alert_tracking('viral', image_id)
+            _publish_moderation_request(image_id, "viral", {"views_5min": views_5min})
 
     # 2. Check for suspicious activity (comment spam)
     if comments_1min >= config.suspicious_threshold_comments_1min:
@@ -59,6 +94,7 @@ def check_and_alert(
                 f"(threshold: {config.suspicious_threshold_comments_1min})"
             )
             _add_to_alert_tracking('suspicious', image_id)
+            _publish_moderation_request(image_id, "suspicious", {"comments_1min": comments_1min})
 
     # 3. Check for popular post
     if views_1hr >= config.popular_threshold_views_1hr:
