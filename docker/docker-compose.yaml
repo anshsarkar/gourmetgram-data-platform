@@ -424,6 +424,37 @@ services:
       redis:
         condition: service_healthy
 
+  # Nimtable (Iceberg Table Browser) - Backend
+  nimtable:
+    image: ghcr.io/nimtable/nimtable:nightly
+    container_name: nimtable
+    restart: unless-stopped
+    ports:
+      - "8182:8182"
+    environment:
+      JAVA_OPTS: -Xmx2g -Xms256m
+    volumes:
+      - ./nimtable-config.yaml:/nimtable/config.yaml:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # Nimtable (Iceberg Table Browser) - Frontend
+  nimtable-web:
+    image: ghcr.io/nimtable/nimtable-web:nightly
+    container_name: nimtable-web
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      JAVA_API_URL: http://nimtable:8182
+      DATABASE_URL: postgresql://nimtable_user:password@postgres:5432/nimtable
+      JWT_SECRET: nimtable-lab-jwt-secret
+      ADMIN_USERNAME: admin
+      ADMIN_PASSWORD: admin
+    depends_on:
+      - nimtable
+
 volumes:
   postgres_data:
   minio_data:
