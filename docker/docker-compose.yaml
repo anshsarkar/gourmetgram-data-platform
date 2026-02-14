@@ -382,8 +382,47 @@ services:
       - ../batch-etl-airflow/plugins:/opt/airflow/plugins
       - ../batch-etl-airflow/logs:/opt/airflow/logs
 
+  # Adminer (PostgreSQL UI)
+  adminer:
+    image: adminer:latest
+    container_name: adminer
+    ports:
+      - "5050:8080"
+    environment:
+      ADMINER_DEFAULT_SERVER: postgres
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # RedPanda Console (Kafka / RedPanda UI)
+  redpanda-console:
+    image: docker.redpanda.com/redpandadata/console:latest
+    container_name: redpanda-console
+    ports:
+      - "8090:8080"
+    environment:
+      KAFKA_BROKERS: redpanda:9092
+      SCHEMAREGISTRY_ENABLED: "true"
+      SCHEMAREGISTRY_URLS: http://redpanda:8081
+    depends_on:
+      redpanda:
+        condition: service_healthy
+
+  # RedisInsight (Redis UI)
+  redisinsight:
+    image: redis/redisinsight:latest
+    container_name: redisinsight
+    ports:
+      - "8081:5540"
+    volumes:
+      - redisinsight_data:/data
+    depends_on:
+      redis:
+        condition: service_healthy
+
 volumes:
   postgres_data:
   minio_data:
   food11:
   redis_data:
+  redisinsight_data:
