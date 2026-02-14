@@ -1,81 +1,104 @@
-# GourmetGram Batch ETL Pipeline
+# Batch ETL — Airflow
 
-Airflow DAGs and configuration for the GourmetGram moderation training data pipeline. It extracts data from Postgres, processes it into features, and loads it into an Iceberg table backed by MinIO.
+Airflow DAGs that run scheduled batch jobs to extract platform activity from Postgres and Kafka, transform it into training features, and load everything into Apache Iceberg tables stored in MinIO. This is the data pipeline that feeds the model training notebook.
 
-## Pipeline Overview
+## What It Does
 
-The `moderation_training_etl` DAG performs the following steps daily:
+Three DAGs:
 
-1.  **Extract:** Dumps `users`, `images`, `comments`, `flags`, and `image_milestones` tables from Postgres to S3 (MinIO) as raw Parquet files.
-2.  **Transform:** Reads raw data, calculates feature vectors (view counts, comment counts, flag counts) at specific decision points (0, 5, 30 mins after upload), and determines the moderation label (flagged within 24h).
-3.  **Load:** Writes the processed training data into an Apache Iceberg table (`gourmetgram.moderation.training_data`) stored in MinIO.
+| DAG | Schedule | Purpose |
+|-----|----------|---------|
+| `redpanda_event_aggregation` | Every hour | Consumes the last hour of events from Kafka, aggregates into 5-min windows, writes to Iceberg |
+| `etl_moderation` | Daily | Extracts Postgres tables → computes 26 training features → loads into Iceberg `moderation.training_data` |
+| `verify_pipeline` | Manual | Validates the Iceberg table exists and prints row count + sample data |
 
-## Architecture & Design Decisions
+---
 
-### Dependency Isolation
-The `load_iceberg` task runs in a dedicated **virtual environment** using `PythonVirtualenvOperator` to resolve a hard dependency conflict:
-*   **Airflow 2.10.5** requires `sqlalchemy<2.0`.
-*   **PyIceberg 0.8.0** (needed for SQL Catalog) requires `sqlalchemy>=2.0`.
-*   **Pandas** is pinned to `<2.2` to avoid `fsspec` incompatibilities.
+## DAG 1: `redpanda_event_aggregation`
 
-### Iceberg Catalog
-*   **Type:** SQL (Postgres backed)
-*   **Warehouse:** `s3://gourmetgram-datalake/warehouse`
-*   **Catalog Name:** `gourmetgram`
-*   **Namespace:** `moderation`
-*   **Table:** `training_data`
+Reads raw view, comment, and flag events from RedPanda (Kafka), groups them into 5-minute windows by image, and writes the aggregated counts to Iceberg.
 
-## Prerequisites
+**Tasks:**
+1. `consume_and_aggregate_events` — pulls last 1 hour of events from Kafka topics
+2. `write_view_windows` — writes aggregated view windows to Iceberg
+3. `write_comment_windows` — writes aggregated comment windows to Iceberg
+4. `write_flag_windows` — writes aggregated flag windows to Iceberg
 
-*   Docker and Docker Compose
-*   Access to the `docker/` directory in the parent repository to run services.
+**Output tables** (Iceberg):
+- `event_aggregations.view_windows_5min`
+- `event_aggregations.comment_windows_5min`
+- `event_aggregations.flag_windows_5min`
 
-## Setup & Configuration
+Schema: `image_id`, `window_start`, `window_end`, `event_count`, `processed_at`
 
-The environment is configured via `docker-compose.yaml`. Key environment variables for Airflow include:
+---
 
-```yaml
-PYICEBERG_CATALOG__GOURMETGRAM__TYPE: sql
-PYICEBERG_CATALOG__GOURMETGRAM__URI: postgresql+psycopg2://user:password@postgres:5432/gourmetgram
-PYICEBERG_CATALOG__GOURMETGRAM__S3__ENDPOINT: http://minio:9000
-PYICEBERG_CATALOG__GOURMETGRAM__WAREHOUSE: s3://gourmetgram-datalake/warehouse
-```
+## DAG 2: `etl_moderation` (main training pipeline)
 
-## How to Execute
+The core ETL. Pulls all platform data from Postgres, engineers 26 features per image, and loads a labeled training dataset into Iceberg.
 
-1.  **Start Services:**
-    From the `docker/` directory:
-    ```bash
-    docker-compose up -d
-    ```
+**Tasks:**
+1. `extract_data` — dumps `users`, `images`, `comments`, `flags`, `image_milestones` tables from Postgres to MinIO as Parquet files (`s3://gourmetgram-datalake/raw/{table}/latest.parquet`)
+2. `transform_features` — joins the tables, computes features at decision points (0, 5, 30 minutes after upload), assigns label = "flagged within 24 hours"
+3. `load_iceberg` — writes processed data to Iceberg table `moderation.training_data`
 
-2.  **Access Airflow UI:**
-    Navigate to [http://localhost:8080](http://localhost:8080).
-    *   **User:** `admin`
-    *   **Password:** `admin`
+**Output table** (Iceberg): `moderation.training_data`
 
-3.  **Trigger DAG:**
-    Enable and trigger the `moderation_training_etl` DAG.
+The `load_iceberg` task runs in an **isolated virtualenv** to avoid a SQLAlchemy version conflict between Airflow 2.x (requires `<2.0`) and PyIceberg (requires `>=2.0`).
 
-## Verification
+---
 
-To verify that data has been correctly loaded into the Iceberg table, use the provided verification script. This script handles the complex dependency environment automatically.
+## Iceberg Catalog
 
+| Setting | Value |
+|---------|-------|
+| Type | SQL (Postgres-backed) |
+| Catalog name | `gourmetgram` |
+| Warehouse | `s3://gourmetgram-datalake/warehouse` |
+| Namespaces | `moderation`, `event_aggregations` |
+
+---
+
+## Input / Output Summary
+
+| What | From | To |
+|------|------|-----|
+| Postgres tables | `gourmetgram` DB | MinIO Parquet (`raw/`) |
+| Kafka events | `gourmetgram.views/comments/flags` topics | Iceberg windowed tables |
+| Training features | MinIO Parquet | Iceberg `moderation.training_data` |
+
+---
+
+## How to Run
+
+**1. Access Airflow UI** — `http://localhost:8080` (login: `admin` / `admin`)
+
+**2. Trigger DAGs manually in this order:**
+- First: `redpanda_event_aggregation` (populates windowed event data)
+- Then: `etl_moderation` (builds the training dataset)
+
+**3. Verify the Iceberg table was populated:**
 ```bash
-docker exec airflow_scheduler python /opt/airflow/dags/verify_pipeline.py
+docker exec airflow-scheduler python /opt/airflow/dags/verify_pipeline.py
 ```
 
-**Expected Output:**
-```text
-Loading catalog 'gourmetgram'...
-Table moderation.training_data found.
-...
-Total rows: 285
-Sample Data (first 5 rows):
-...
+---
+
+## Known Issues
+
+- **UniqueViolation on `load_iceberg`**: Happens if two DAG runs execute simultaneously. Clear the failed task and re-run with only one active run.
+- **Dependency conflicts**: If you modify the `load_iceberg` task, update the `requirements` list *inside* `etl_moderation.py`, not the top-level `requirements.txt`.
+
+---
+
+## Files
+
 ```
-
-## Troubleshooting
-
-*   **Task Failed with `UniqueViolation`:** If multiple runs execute `load_iceberg` simultaneously, Postgres may throw a key violation during table creation. **Solution:** Clear the failed task and ensure only one run is executing at a time.
-*   **Dependency Errors:** If modifying `load_iceberg`, remember to update the `requirements` list in `etl_moderation.py`, NOT just the main `requirements.txt`.
+batch-etl-airflow/
+  Dockerfile
+  requirements.txt
+  dags/
+    etl_moderation.py            # main daily ETL DAG
+    redpanda_event_aggregation.py  # hourly Kafka windowing DAG
+    verify_pipeline.py           # manual Iceberg validation script
+```
