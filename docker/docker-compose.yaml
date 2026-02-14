@@ -414,6 +414,10 @@ services:
     container_name: redisinsight
     ports:
       - "8081:5540"
+    environment:
+      RI_REDIS_HOST: redis
+      RI_REDIS_PORT: "6379"
+      RI_REDIS_ALIAS: "gourmetgram-redis"
     volumes:
       - redisinsight_data:/data
     depends_on:
