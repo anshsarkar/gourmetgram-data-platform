@@ -19,7 +19,8 @@ COPY requirements.txt /requirements.txt
 RUN pip install --no-cache-dir -r /requirements.txt
 
 # Create isolated venv for pyiceberg (needs sqlalchemy>=2.0, incompatible with Airflow's <2.0)
-# The DAG calls python.real with -I flag (isolated mode) to prevent user site-packages leaking in
+# The DAG calls python.real with -I flag (isolated mode) to prevent user site-packages leaking 
+# This is to make sure that there are no conflicts between pyiceberg's dependencies and Airflow's dependencies
 RUN python -m venv /home/airflow/iceberg_venv \
     && /home/airflow/iceberg_venv/bin/pip install --no-cache-dir \
        'pyiceberg[s3fs,sql-postgres]==0.8.0' \
