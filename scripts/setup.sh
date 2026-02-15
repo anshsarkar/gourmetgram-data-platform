@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-echo "=== vllm-ltr-sched: Instance Setup ==="
+echo "=== Instance Setup ==="
 echo ""
 
 # ---- 1. Install Docker ----
@@ -22,3 +22,4 @@ if ! command -v docker &>/dev/null; then
     echo "Docker installed. You may need to log out and back in for group changes."
 else
     echo "Docker already installed: $(docker --version)"
+fi
