@@ -233,6 +233,7 @@ The stream consumer uses `ZCOUNT` with a time range to count events within any w
 Open **Adminer** → http://[FLOATING_IP]:5050
 
 Login:
+- **System**: PostgreSQL
 - **Server**: postgres
 - **Username**: user
 - **Password**: password
@@ -365,17 +366,17 @@ SELECT COUNT(*) FROM flags;
 
 Go to **http://[FLOATING_IP]:8080** — login: `admin` / `admin`
 
-You'll see three DAGs, all paused by default:
+You'll see two DAGs, all paused by default:
 
 | DAG | Schedule | Purpose |
 |-----|----------|---------|
 | `redpanda_event_aggregation` | Hourly | Kafka → windowed Iceberg tables |
 | `etl_moderation` | Daily | Postgres → feature engineering → training dataset |
-| `verify_pipeline` | Manual | Validate the Iceberg table |
+
 
 ### 6c. Run the event aggregation DAG first
 
-In Airflow UI → **DAGs** → `redpanda_event_aggregation` → Toggle ON (unpause) → **Trigger DAG** (▶ button).
+In Airflow UI → **DAGs** → `redpanda_event_aggregation` → Toggle ON (unpause) from toggle option towards the left of the DAG → This should automatically trigger and run immediately since it's scheduled hourly. If not, click **Trigger DAG**.
 
 This reads the last hour of Kafka events and writes aggregated 5-minute windows to three Iceberg tables in MinIO.
 
@@ -383,7 +384,7 @@ Watch it complete in the **Graph** view — all tasks should turn green.
 
 ### 6d. Run the main ETL DAG
 
-DAGs → `etl_moderation` → Toggle ON → **Trigger DAG**.
+DAGs → `etl_moderation` → Toggle ON (unpause) from toggle option towards the left of the DAG → This should trigger immediately since it's scheduled daily. If not, click **Trigger DAG**.
 
 This runs three tasks:
 1. **`extract_data`** — dumps `users`, `images`, `comments`, `flags`, `image_milestones` from Postgres to MinIO as Parquet files at `s3://gourmetgram-datalake/raw/`
@@ -459,7 +460,7 @@ docker run --rm --memory="512m" \
   gourmetgram-trainer:latest
 ```
 
-Open the Jupyter link from the terminal output (`http://127.0.0.1:8888/tree?token=...`), then open `training.ipynb`. Replace 127.0.0.1 with you Chameleon instance's floating IP when accessing from your host machine.
+Open the Jupyter link from the terminal output (`http://127.0.0.1:8888/tree?token=...`), then open `training_large_data_demo.ipynb`. Replace 127.0.0.1 with you Chameleon instance's floating IP when accessing from your host machine.
 
 ### 7c. Run the four scenarios in order
 
@@ -475,15 +476,17 @@ Tries to load `moderation.large_training_data` (6M+ rows) all at once with `tabl
 
 Uses PyIceberg's `ArrowBatchReader` to stream the large dataset in batches of ~10K rows. Trains an `SGDClassifier` with `partial_fit()` — one batch at a time, without ever loading the full dataset. Memory usage stays flat regardless of dataset size. Saves artifacts to `models/` inside the container (which is bind-mounted to `model_training/models/` on your host).
 
-**Scenario 4 — Upload to MinIO**
+**Scenario 4 — Train on real data and upload to MinIO**
 
-Uploads `model.joblib`, `scaler.joblib`, `encoder.joblib`, and `metadata.json` to `s3://gourmetgram-datalake/models/moderation/`.
+Now switch to `training.ipynb`, which trains on the real `moderation.training_data` table produced by the ETL pipeline. Run the cells in order.
 
-The inference service polls for `metadata.json` every 30 seconds. Uploading it triggers an automatic model reload.
+> **Note:** Make sure cells 3 and 5 remain commented out — those are the OOM demo cells from the large dataset exercise and are not needed here.
+
+The final cell uploads `model.joblib`, `scaler.joblib`, `encoder.joblib`, and `metadata.json` to MinIO. The inference service polls for `metadata.json` every 30 seconds — uploading it triggers an automatic model reload.
 
 ### 7d. Verify artifacts in MinIO
 
-Open **MinIO Console** → http://[FLOATING_IP]:9001 → `gourmetgram-datalake` → `models/moderation/`
+Open **MinIO Console** → http://[FLOATING_IP]:9001 → bucket `gourmetgram-datalake` → `models/moderation/`
 
 You should see four files: `model.joblib`, `scaler.joblib`, `encoder.joblib`, `metadata.json`.
 
@@ -497,6 +500,11 @@ The inference service is still running in heuristic mode. Now we'll switch it to
 
 Open `inference_service/moderator.py` and find the toggle at the top of the file:
 
+```bash
+cd gourmetgram-data-platform/inference_service
+nano moderator.py
+```
+
 ```python
 # ============================================================
 # INFERENCE MODE TOGGLE
@@ -508,10 +516,12 @@ USE_MODEL = False   # <-- CHANGE TO True TO USE TRAINED MODEL
 
 Change `False` → `True` and save.
 
+Pess `Ctrl+X`, then `Y`, then `Enter` to save and exit Nano.
+
 ### 8b. Rebuild and restart the inference service
 
 ```bash
-cd docker
+cd ../docker
 docker compose up -d --build inference_service
 ```
 

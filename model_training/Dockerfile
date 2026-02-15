@@ -16,6 +16,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy the notebook
 COPY training.ipynb .
+COPY training_large_data_demo.ipynb .
 
 # Create a directory for model artifacts
 RUN mkdir models
