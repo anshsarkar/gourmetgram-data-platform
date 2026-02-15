@@ -14,9 +14,10 @@ RUN apt-get update && apt-get install -y \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy the notebook
+# Copy the notebooks and scripts
 COPY training.ipynb .
 COPY training_large_data_demo.ipynb .
+COPY generate_large_dataset.py .
 
 # Create a directory for model artifacts
 RUN mkdir models
