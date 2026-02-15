@@ -410,7 +410,31 @@ Sample rows: ...
 
 Open **Nimtable** → http://[FLOATING_IP]:3000 — login: `admin` / `admin`
 
-Navigate to namespace `moderation` → table `training_data`. You can browse the schema and preview rows. Iceberg stores the data as Parquet files in MinIO — Nimtable is just a catalog browser.
+Nimtable starts with no catalogs configured. Connect it to the platform:
+
+1. From the left sidebar, click **Catalogs** → **Add Catalog** → **Connect Catalog**
+2. Fill in the form:
+
+   | Field | Value |
+   |-------|-------|
+   | Connection Method | `JDBC + S3` |
+   | Catalog Name | `gourmetgram` |
+   | Catalog Endpoint | `jdbc:postgresql://postgres:5432/gourmetgram` |
+   | Warehouse | `s3://gourmetgram-datalake/warehouse` |
+   | S3 Endpoint | `http://minio:9000` |
+   | Access Key | `admin` |
+   | Secret Key | `password` |
+
+3. Click **Advanced Options** and add:
+
+   | Property | Value |
+   |----------|-------|
+   | `jdbc.user` | `user` |
+   | `jdbc.password` | `password` |
+
+4. Click **Connect Catalog**. You should see a success message.
+
+Navigate to namespace `moderation` → table `training_data` to browse the schema and preview rows. Iceberg stores the data as Parquet files in MinIO — Nimtable is just a catalog browser.
 
 You can also see the raw Parquet files at **MinIO Console** → http://[FLOATING_IP]:9001 → bucket `gourmetgram-datalake` → `warehouse/moderation/training_data/`.
 
