@@ -468,7 +468,7 @@ docker run --rm --network host \
 The `--memory="512m"` flag caps the container at 512 MB — this is intentional. It forces the OOM crash in Scenario 2 so you can see what happens when you try to load a 6M+ row dataset into a Pandas DataFrame.
 
 ```bash
-docker run --rm --memory="512m" \
+docker run --rm --memory="1g" \
   --network host \
   -p 8888:8888 \
   -v $(pwd)/models:/app/models \
