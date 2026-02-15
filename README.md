@@ -60,7 +60,83 @@ End-to-end MLOps lab: real-time data ingestion, batch ETL, streaming model train
 
 ## Step 1 — Provision a Chameleon Instance
 
-> _[Fill in Chameleon instance provisioning steps here]_
+### 1a. Create a lease
+
+Go to the [KVM@TACC dashboard](https://kvm.tacc.chameleoncloud.org/project/) and make sure you have selected your course project from the project dropdown at the top of the page.
+
+From the left sidebar, navigate to **Reservations → Leases** and click **Create Lease**.
+
+Fill in the lease details:
+- **Lease Name**: `lab-4-data-platform`
+- **Start Date**: today's date | **Start Time**: now (current time)
+- **End Date / End Time**: 4 hours from now
+- Make sure all times are in **UTC**
+
+Click **Next** to go to the Flavors page. Check the **Reserve Flavors** checkbox, then select `m1.xlarge` from the list. Click **Next**. On the Networks page leave everything as default and click **Next**, then click **Create Lease**.
+
+Wait for the lease status to show **Active** before proceeding.
+
+### 1b. Launch the instance
+
+From the left sidebar, go to **Compute → Instances** and click **Launch Instance**.
+
+Work through each page of the wizard:
+
+1. **Details** — Set the instance name to `lab-4-data-platform-[NETID]` (replace `[NETID]` with your NYU NetID). Click **Next**.
+2. **Source** — Search for `Ubuntu24.04` in the image list and select it. Click **Next**.
+3. **Flavor** — Search for your lease name (`lab-4-data-platform`) in the list and select it. This ties the instance to your reserved hardware. Click **Next**.
+4. **Networks** — Add `sharednet1` to the selected networks list. Click **Next**.
+5. **Network Ports** — Leave as default. Click **Next**.
+6. **Key Pair** — Select the SSH key pair you set up for this course. Click **Next**.
+7. **Configuration** and **Scheduler Hints** — Leave as default.
+
+Click **Launch Instance**. The instance will appear in the list with status **Spawning**, then transition to **Active** after about a minute.
+
+### 1c. Associate a floating IP
+
+A floating IP is a publicly routable address that lets you reach the instance (and all its services) from your local machine.
+
+In the Instances list, click the **dropdown arrow** next to the **Create Snapshot** button for your instance and select **Associate Floating IP**.
+
+In the dialog, select an available floating IP from the dropdown and click **Associate**. The floating IP will now appear in the instance row under the **IP Address** column.
+
+Note this IP address — replace `[FLOATING_IP]` with it everywhere in this lab.
+
+Open a terminal on your local machine and SSH in to verify:
+
+```bash
+ssh -i ~/.ssh/id_rsa_chameleon cc@[FLOATING_IP]
+```
+
+If you stored your key under a different path:
+```bash
+ssh -i [PATH_TO_YOUR_KEY] cc@[FLOATING_IP]
+```
+
+You should see a welcome message from Ubuntu. You are now inside the Chameleon instance.
+
+### 1d. Open security group ports
+
+By default, the instance only allows SSH traffic. You need to open ports for each service in this lab.
+
+From the Instances list, click the dropdown next to **Create Snapshot** → **Edit Security Groups**.
+
+Add each of the following security groups by clicking the **+** next to their name. If a group is missing from the list, see the note below.
+
+| Security Group | Port | Service |
+|---------------|------|---------|
+| `allow-8000` | 8000 | FastAPI |
+| `allow-8080` | 8080 | Airflow |
+| `allow-5050` | 5050 | Adminer |
+| `allow-8090` | 8090 | Redpanda Console |
+| `allow-8081` | 8081 | Redis Insight |
+| `allow-9001` | 9001 | MinIO Console |
+| `allow-3000` | 3000 | Nimtable |
+| `allow-8888` | 8888 | Jupyter (training notebook) |
+
+Click **Save**.
+
+> **If a security group is missing:** Go to **Network → Security Groups** from the left sidebar and click **Create Security Group**. Give it the name `allow-[PORT]` (e.g. `allow-8000`). Once created, click the dropdown next to it → **Manage Rules** → **Add Rule**. Leave everything default except set **Port** to the port number you want to open (e.g. `8000`). Click **Add**. Then go back to your instance and add the newly created group via **Edit Security Groups**.
 
 ---
 
