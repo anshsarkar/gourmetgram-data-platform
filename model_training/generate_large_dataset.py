@@ -2,11 +2,13 @@ import pandas as pd
 import numpy as np
 from pyiceberg.catalog import load_catalog
 import pyarrow as pa
+import pyarrow.parquet as pq
 import time
 
 # Configuration
 NUM_ROWS = 6_000_000  # 6 Million Rows ~ 1.2GB in memory
-BATCH_SIZE = 1_000_000 # Process in chunks to avoid OOM during generation
+BATCH_SIZE = 500_000  # Write in smaller chunks so each Parquet file has manageable row groups
+ROW_GROUP_SIZE = 50_000  # Rows per Parquet row group — controls streaming batch size
 TABLE_NAME = "moderation.large_training_data"
 
 def generate_batch(size):
@@ -58,7 +60,11 @@ def main():
         for i in range(0, NUM_ROWS, BATCH_SIZE):
             print(f"Processing batch {i // BATCH_SIZE + 1} / {NUM_ROWS // BATCH_SIZE}...")
             df_batch = generate_batch(BATCH_SIZE)
-            table.append(pa.Table.from_pandas(df_batch))
+            arrow_table = pa.Table.from_pandas(df_batch)
+            # Split into smaller PyArrow tables so each Parquet file has one manageable row group
+            # This ensures to_arrow_batch_reader() yields ~ROW_GROUP_SIZE rows per batch
+            for offset in range(0, len(arrow_table), ROW_GROUP_SIZE):
+                table.append(arrow_table.slice(offset, ROW_GROUP_SIZE))
             
         print(f"✅ Success! Generated {NUM_ROWS} rows in {time.time() - start_time:.2f} seconds.")
         print(f"Table {TABLE_NAME} is ready for OOM testing.")
