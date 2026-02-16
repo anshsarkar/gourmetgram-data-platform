@@ -6,6 +6,8 @@ End-to-end MLOps lab: real-time data ingestion, batch ETL, streaming model train
 
 ## Architecture Overview
 
+![GourmetGram Data Platform Architecture](architecture.png)
+
 ```
 [Food-11 Dataset]
        │
